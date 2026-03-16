@@ -17,11 +17,6 @@ All notable changes to Vision CLI are documented here.
 - `/chats save <name>`, `/chats list`, `/chats load <#>` commands
 - Advisor history persists across sessions
 
-### 🎨 Mascot & UI
-- Vision CLI TUI prototype designed (HTML/CSS)
-- War-room aesthetic — teal/black, ASCII banner, pixel sidebar
-- Thinking animation dots in TUI
-
 ### 📈 Stocks — Major Overhaul
 - Fixed US stock support — AAPL, TSLA, MSFT etc. now work
 - Tries NSE → BSE → US (no suffix) automatically
