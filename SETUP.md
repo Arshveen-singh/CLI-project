@@ -51,10 +51,7 @@ python vision_cli.py
 2. Sign up → **Keys** → **Create key**
 3. Set as `OPENROUTER_API_KEY`
 
-### HuggingFace (Optional — image generation fallback)
-1. Go to [huggingface.co](https://huggingface.co)
-2. Sign up → Settings → **Access Tokens** → New token
-3. Set as `HF_TOKEN`
+
 
 ---
 
