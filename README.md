@@ -76,7 +76,7 @@ Get your free Groq key → [console.groq.com](https://console.groq.com)
 - Inline Python execution
 
 ### 🌐 Web Tools
-- Web search, scraping, headless browser, Wikipedia, weather
+- Web search, scraping, headless browser (will make it fully functional), Wikipedia, weather
 
 ### 🎨 Media
 - AI image generation (Pollinations.ai + HuggingFace fallback)
