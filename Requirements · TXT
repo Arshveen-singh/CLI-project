@@ -1,14 +1,54 @@
-rich>=13.0.0
-groq>=0.4.0
-ddgs>=3.0.0
-playwright>=1.40.0
-beautifulsoup4>=4.12.0
-requests>=2.31.0
-wikipedia>=1.4.0
-easyocr>=1.7.0
-yfinance>=0.2.36
-openai>=1.10.0
-speechrecognition>=3.10.0
-pyttsx3>=2.90
-pygame>=2.5.0
-yt-dlp>=2024.1.0
+# Vision CLI v4.0 — Requirements
+# MIT License — Copyright (c) 2026 Arshveen Singh
+
+# ── Core (required) ──────────────────────────────
+openai>=1.0.0
+groq
+rich
+requests
+
+# ── Stocks ───────────────────────────────────────
+yfinance
+
+# ── Web / Search ─────────────────────────────────
+duckduckgo-search
+beautifulsoup4
+wikipedia
+
+# ── GitHub integration ────────────────────────────
+PyGithub
+
+# ── Optional: Music ──────────────────────────────
+# yt-dlp
+# pygame
+
+# ── Optional: Voice / TTS ────────────────────────
+# pyttsx3
+# SpeechRecognition
+
+# ── Optional: Image OCR ──────────────────────────
+# easyocr
+
+# ── Optional: Browser automation ─────────────────
+# playwright
+# (also run: playwright install chromium)
+
+# ── Optional: WhatsApp ───────────────────────────
+# twilio
+
+# ── Optional: Discord ────────────────────────────
+# discord.py
+
+# ── Optional: Google Calendar / Drive ────────────
+# google-api-python-client
+# google-auth-httplib2
+# google-auth-oauthlib
+
+# ── Optional: Notion ─────────────────────────────
+# notion-client
+
+# ── Optional: Spotify ────────────────────────────
+# spotipy
+
+# ── Optional: Bytez (175k+ models) ───────────────
+# bytez
