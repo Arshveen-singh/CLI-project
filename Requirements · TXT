@@ -1,4 +1,4 @@
-# Vision CLI v4.0 — Requirements
+# Vision CLI v4.2 — Requirements
 # MIT License — Copyright (c) 2026 Arshveen Singh
 
 # ── Core (required) ──────────────────────────────
@@ -15,7 +15,7 @@ duckduckgo-search
 beautifulsoup4
 wikipedia
 
-# ── GitHub integration ────────────────────────────
+# ── GitHub ───────────────────────────────────────
 PyGithub
 
 # ── Optional: Music ──────────────────────────────
@@ -31,7 +31,7 @@ PyGithub
 
 # ── Optional: Browser automation ─────────────────
 # playwright
-# (also run: playwright install chromium)
+# After install: playwright install chromium
 
 # ── Optional: WhatsApp ───────────────────────────
 # twilio
@@ -50,5 +50,5 @@ PyGithub
 # ── Optional: Spotify ────────────────────────────
 # spotipy
 
-# ── Optional: Bytez (175k+ models) ───────────────
+# ── Optional: Bytez (175k+ HuggingFace models) ───
 # bytez
