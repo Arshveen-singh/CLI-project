@@ -1,7 +1,6 @@
 # MIT License — Copyright (c) 2026 Arshveen Singh
-# Vision CLI v4.1 — 9 providers, LLM Council, GitHub, Automation,
-# Telegram, Email, Scheduler, Multi-agent, Streaming, Vision input, Smart memory.
-# Fixes: Groq token cap, Kimi cutoff, Bytez OpenAI-compatible endpoint.
+# Vision CLI v1.4.4 — Setup wizard, actionable errors, data cleanup, /export,
+# auto web search, /undo, multi-session council, skill marketplace, local API mode.
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -27,19 +26,100 @@ DATA_FILE  = "vision_data.json"
 CHATS_DIR  = "vision_chats"
 MUSIC_DIR  = "vision_music"
 AGENTS_DIR = "vision_agents"
-for d in [CHATS_DIR, MUSIC_DIR, AGENTS_DIR]:
+SKILLS_DIR = "vision_skills"
+for d in [CHATS_DIR, MUSIC_DIR, AGENTS_DIR, SKILLS_DIR]:
     Path(d).mkdir(exist_ok=True)
+
+# Create default built-in skills if they don't exist
+_DEFAULT_SKILLS = {
+    "coding.md": """# Skill: Senior Developer
+## Role
+You are a senior software engineer. Every response involving code must be production-quality.
+## Rules
+- Always add inline comments explaining non-obvious logic
+- Always include error handling (try/except)
+- Never use placeholder code or TODOs
+- Point out security issues if you spot them
+- Prefer Python unless specified otherwise
+## Style
+Direct, technical, no hand-holding. Treat user as a fellow engineer.""",
+
+    "security.md": """# Skill: Cybersecurity Analyst
+## Role
+You are an expert ethical hacker and security researcher.
+## Rules
+- Always mention CVE numbers when relevant
+- Flag insecure code immediately with severity (Critical/High/Medium/Low)
+- Think like an attacker, respond like a defender
+- Reference OWASP, MITRE ATT&CK, NIST where applicable
+- For any code: point out attack surfaces, injection risks, auth flaws
+## Style
+Precise, threat-aware, never sugarcoat a vulnerability.""",
+
+    "research.md": """# Skill: Research Analyst
+## Role
+You are a deep research analyst. Every answer must be thorough and evidence-backed.
+## Rules
+- Always structure responses with clear sections
+- Cite specific data points, studies, or examples
+- Present multiple perspectives before concluding
+- Flag uncertainty explicitly — never guess without saying so
+- Use tables and comparisons where helpful
+## Style
+Academic rigor with readable prose. No fluff.""",
+
+    "teacher.md": """# Skill: Patient Teacher
+## Role
+You are a patient, brilliant teacher who makes complex things simple.
+## Rules
+- Always use analogies and real-world examples
+- Build from fundamentals before going deep
+- Check understanding — ask if the explanation made sense
+- Never make the user feel dumb for asking basic questions
+- Use the Feynman technique: explain simply enough that a 12-year-old gets it
+## Style
+Warm, encouraging, genuinely excited about knowledge.""",
+
+    "jarvis.md": """# Skill: JARVIS Mode
+## Role
+You are JARVIS — Vision's most advanced mode. Brief, precise, proactive.
+## Rules
+- Keep responses short unless depth is genuinely needed
+- Anticipate what the user needs next and mention it
+- Address user as 'sir' occasionally (not every message)
+- Format all code and data cleanly
+- Prioritize action over explanation
+## Style
+Sharp, confident, slightly formal. Tony Stark's assistant energy.""",
+}
+
+for fname, content in _DEFAULT_SKILLS.items():
+    fpath = Path(SKILLS_DIR) / fname
+    if not fpath.exists():
+        fpath.write_text(content)
 
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
-            return json.load(f)
+            d = json.load(f)
+        # Migrate old data — add missing keys without breaking existing data
+        d.setdefault("council_history", [])
+        d.setdefault("usage_log", [])
+        d.setdefault("model_scores", {})
+        d.setdefault("style_prefs", {})
+        d.setdefault("economy", {"sessions":0,"total_mins":0,"commands_used":{},"weekly_reports":[]})
+        d.setdefault("predictive_patterns", [])
+        return d
     return {
         "memory": {}, "goals": [], "portfolio": {},
         "advisor_history": [], "automations": [],
         "github_token": None, "telegram_token": None,
         "telegram_chat_id": None, "email_config": {},
-        "created": datetime.now().strftime("%d/%m/%Y")
+        "usage_log": [], "model_scores": {}, "style_prefs": {},
+        "economy": {"sessions":0,"total_mins":0,"commands_used":{},"weekly_reports":[]},
+        "predictive_patterns": [], "council_history": [],
+        "created": datetime.now().strftime("%d/%m/%Y"),
+        "first_run": True,
     }
 
 def save_data():
@@ -48,8 +128,35 @@ def save_data():
     data["portfolio"]       = portfolio
     data["advisor_history"] = advisor_history[-20:]
     data["automations"]     = automations
+    data["usage_log"]       = usage_log[-500:]
+    data["model_scores"]    = model_scores
+    data["style_prefs"]     = style_prefs
+    data["economy"]         = economy
+    data["predictive_patterns"] = predictive_patterns[-100:]
+    data["council_history"] = council_history[-50:]   # keep last 50 council sessions
+    data["first_run"]       = False
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
+    _cleanup_data_if_needed()
+
+def _cleanup_data_if_needed():
+    """Auto-archive if vision_data.json exceeds 5MB."""
+    try:
+        size_mb = os.path.getsize(DATA_FILE) / (1024 * 1024)
+        if size_mb > 5:
+            archive_name = f"vision_data_archive_{datetime.now().strftime('%d%m%Y_%H%M')}.json"
+            import shutil
+            shutil.copy(DATA_FILE, archive_name)
+            # Trim aggressively after archiving
+            data["usage_log"]       = data.get("usage_log", [])[-100:]
+            data["advisor_history"] = data.get("advisor_history", [])[-10:]
+            data["council_history"] = data.get("council_history", [])[-20:]
+            data["predictive_patterns"] = data.get("predictive_patterns", [])[-20:]
+            with open(DATA_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+            console.print(f"[dim]📦 Data archived to {archive_name} (was {size_mb:.1f}MB)[/dim]")
+    except Exception:
+        pass  # never crash on cleanup
 
 data             = load_data()
 memory           = data.get("memory", {})
@@ -57,11 +164,21 @@ goals            = data.get("goals", [])
 portfolio        = data.get("portfolio", {})
 advisor_history  = data.get("advisor_history", [])
 automations      = data.get("automations", [])
+usage_log        = data.get("usage_log", [])
+model_scores     = data.get("model_scores", {})
+style_prefs      = data.get("style_prefs", {})
+economy          = data.get("economy", {"sessions":0,"total_mins":0,"commands_used":{},"weekly_reports":[]})
+predictive_patterns = data.get("predictive_patterns", [])
+council_history  = data.get("council_history", [])   # multi-session council storage
+session_start    = datetime.now()
 history               = []
 mic_mode              = False
 last_request_time     = 0
 streaming_mode        = True
-current_provider_name = ""   # set at startup + on /provider switch
+current_provider_name = ""
+
+# Undo stack — stores last 10 reversible actions
+undo_stack = []  # each entry: {"type": "memory"|"automation", "action": "add"|"delete", "data": {...}}
 
 def get_max_tokens(base=2048):
     """
@@ -70,6 +187,18 @@ def get_max_tokens(base=2048):
     All other providers use the full base limit.
     """
     return 1024 if current_provider_name == "Groq" else base
+
+# ── Context window config ─────────────────────────────────────────
+# MAX_HISTORY  — how many messages before rolling summarization kicks in
+# KEEP_RECENT  — how many recent messages to keep verbatim after summarizing
+# SUMMARY_TAKE — how many oldest messages get compressed into a summary block
+MAX_HISTORY  = 40   # bigger window than before (was 20, hard-trim)
+KEEP_RECENT  = 20   # always keep last 20 messages verbatim
+SUMMARY_TAKE = 20   # summarize the oldest 20 when limit hit
+
+# Rolling summaries — stored as a single injected context block
+conversation_summary      = ""   # main chat rolling summary
+advisor_summary           = ""   # advisor chat rolling summary
 
 # ══════════════════════════════════════════════════════════════════
 # RATE LIMITING
@@ -112,6 +241,7 @@ def memory_add(key, value, tag=""):
         "value": value, "tag": tag,
         "added": datetime.now().strftime("%d/%m/%Y %H:%M")
     }
+    undo_push("memory", "add", {"key": key, "value": memory[key]})
     save_data()
     console.print(f"[green]✓ Memory: {key} → {value} {tag}[/green]")
 
@@ -312,6 +442,959 @@ def generate_image(prompt):
             console.print(f"[green]✓ Saved: '{filename}'[/green]")
     except Exception as e: console.print(f"[red]{e}[/red]")
 
+
+# ══════════════════════════════════════════════════════════════════
+# ACTIONABLE ERROR HELPER
+# ══════════════════════════════════════════════════════════════════
+def actionable_error(err_str, context=""):
+    """
+    Converts raw API errors into human-readable fixes.
+    Never shows raw stack traces to user.
+    """
+    err = err_str.lower()
+    if "rate limit" in err or "429" in err:
+        console.print(Panel(
+            "[bold yellow]⏳ Rate limit hit[/bold yellow]\n\n"
+            "Vision is waiting and will retry automatically.\n"
+            f"[dim]Tip: Switch to a faster provider with /provider, or try llama-3.1-8b-instant on Groq.[/dim]",
+            border_style="yellow"))
+    elif "model" in err and any(x in err for x in ["not found","does not exist","invalid"]):
+        console.print(Panel(
+            f"[bold red]✗ Model not found[/bold red]\n\n"
+            f"[dim]{context}[/dim]\n\n"
+            "Try:\n"
+            "  • [cyan]/model[/cyan] to pick a different model\n"
+            "  • [cyan]/provider[/cyan] to switch provider\n"
+            "  • Check exact model ID at openrouter.ai/models",
+            border_style="red"))
+    elif "401" in err or "auth" in err or "api key" in err:
+        console.print(Panel(
+            "[bold red]✗ Authentication failed[/bold red]\n\n"
+            "Your API key is invalid or expired.\n\n"
+            "Fix:\n"
+            "  • Run [cyan]/provider[/cyan] and re-enter your key\n"
+            "  • Or set env var: [cyan]os.environ['GROQ_API_KEY'] = 'gsk_...'[/cyan]",
+            border_style="red"))
+    elif "connection" in err or "timeout" in err or "network" in err:
+        console.print(Panel(
+            "[bold yellow]⚠ Network error[/bold yellow]\n\n"
+            "Can't reach the provider. Check your connection.\n"
+            "[dim]If on Colab, the session may have timed out. Reconnect and rerun.[/dim]",
+            border_style="yellow"))
+    elif "<!doctype" in err or "cannot post" in err or "<html" in err:
+        console.print(Panel(
+            "[bold red]✗ Endpoint error[/bold red]\n\n"
+            "Provider returned an HTML error page — model ID is wrong or endpoint is down.\n"
+            "  • Run [cyan]/model[/cyan] and pick from the suggested list\n"
+            "  • For Bytez: use HuggingFace format e.g. [cyan]Qwen/Qwen2-7B-Instruct[/cyan]",
+            border_style="red"))
+    elif "context" in err or "token" in err and "limit" in err:
+        console.print(Panel(
+            "[bold yellow]⚠ Context too long[/bold yellow]\n\n"
+            "Message history too long for this model's context window.\n"
+            "  • Run [cyan]/clear[/cyan] to start fresh\n"
+            "  • Or use a model with larger context (e.g. [cyan]moonshotai/kimi-k2[/cyan] on OpenRouter)",
+            border_style="yellow"))
+    else:
+        console.print(Panel(
+            f"[bold red]✗ Error[/bold red]\n\n{err_str[:300]}\n\n"
+            "[dim]Run /model or /provider if this keeps happening.[/dim]",
+            border_style="red"))
+
+# ══════════════════════════════════════════════════════════════════
+# SETUP WIZARD
+# ══════════════════════════════════════════════════════════════════
+def run_setup_wizard():
+    """
+    First-run interactive setup wizard.
+    Guides user through provider selection, API key, test call.
+    Only runs when vision_data.json doesn't exist or first_run=True.
+    """
+    console.print(Panel(
+        "[bold cyan]👋 Welcome to Vision CLI v4.4[/bold cyan]\n\n"
+        "First-time setup — takes about 60 seconds.\n"
+        "Vision will guide you through choosing a provider and testing your connection.\n\n"
+        "[dim]You can skip any step with Enter and configure later.[/dim]",
+        border_style="cyan"))
+
+    console.print("\n[bold white]Step 1 — Choose your AI provider[/bold white]\n")
+    console.print("Recommended for first-timers:\n")
+    console.print("  [bold green][1] Groq[/bold green]       — Free, ultra fast, no credit card needed")
+    console.print("             Get key: [cyan]console.groq.com[/cyan]")
+    console.print("  [bold green][2] OpenRouter[/bold green] — Access 200+ models, generous free tier")
+    console.print("             Get key: [cyan]openrouter.ai/keys[/cyan]")
+    console.print("  [bold green][3] Ollama[/bold green]     — 100% local, completely free, no internet needed")
+    console.print("             Install: [cyan]ollama.ai[/cyan]")
+    console.print("  [dim][4] Skip — I'll configure manually[/dim]\n")
+
+    choice = input("→ Pick (1-4): ").strip()
+
+    if choice == "4" or not choice:
+        console.print("[dim]Skipping wizard. Run /provider to configure later.[/dim]\n")
+        return None, None
+
+    provider_map = {"1":"1","2":"2","3":"3"}
+    provider_choice = provider_map.get(choice, "1")
+
+    console.print("\n[bold white]Step 2 — API Key[/bold white]\n")
+    if choice == "3":
+        console.print("[dim]Ollama runs locally — no API key needed.[/dim]")
+        console.print("[dim]Make sure Ollama is running: ollama serve[/dim]\n")
+    elif choice == "1":
+        console.print("Get your free Groq key at: [cyan]console.groq.com[/cyan]")
+        console.print("[dim]It's free. No credit card. Takes 30 seconds.[/dim]\n")
+        key = input("→ Paste your Groq API key (or Enter to skip): ").strip()
+        if key:
+            os.environ["GROQ_API_KEY"] = key
+            console.print("[green]✓ Key saved for this session[/green]")
+            console.print("[dim]To make permanent: add to Colab secrets or your shell profile[/dim]")
+    elif choice == "2":
+        console.print("Get your free OpenRouter key at: [cyan]openrouter.ai/keys[/cyan]")
+        console.print("[dim]Free tier gives access to many models including DeepSeek R1, Kimi K2, LLaMA 3.3.[/dim]\n")
+        key = input("→ Paste your OpenRouter key (or Enter to skip): ").strip()
+        if key:
+            os.environ["OPENROUTER_API_KEY"] = key
+            console.print("[green]✓ Key saved for this session[/green]")
+
+    console.print("\n[bold white]Step 3 — Quick features overview[/bold white]\n")
+    features = [
+        ("💬 Chat",        "Just type anything — Vision answers"),
+        ("⚖ Council",      "/council <question> — multiple models debate"),
+        ("🧠 Skills",       "/skill load security — Vision becomes a security expert"),
+        ("📊 Stocks",       "/stock RELIANCE — live NSE prices"),
+        ("🤖 Multi-agent",  "/agent <complex task> — parallel AI workers"),
+        ("⚡ Automation",   "/automate daily:09:00 | /marketnews | Morning news"),
+        ("🔍 Memory",       "/memory add name Arshveen — Vision remembers forever"),
+        ("📁 GitHub",       "/ghconnect — load your repos into context"),
+    ]
+    for icon_name, desc in features:
+        console.print(f"  {icon_name:<20} {desc}")
+
+    console.print(f"\n[dim]Type /help anytime to see all {70}+ commands.[/dim]\n")
+    console.print(Panel(
+        "[bold green]✓ Setup complete![/bold green]\n\n"
+        "Vision CLI is ready. Start by typing anything, or try:\n"
+        "  [cyan]/skill list[/cyan]  →  see available skills\n"
+        "  [cyan]/help[/cyan]        →  full command reference",
+        border_style="green"))
+
+    return provider_choice, None
+
+# ══════════════════════════════════════════════════════════════════
+# UNDO SYSTEM
+# ══════════════════════════════════════════════════════════════════
+def undo_push(action_type, action, item_data):
+    """Push to undo stack. Max 10 entries."""
+    undo_stack.append({"type":action_type,"action":action,"data":item_data,"time":datetime.now().strftime("%H:%M:%S")})
+    if len(undo_stack) > 10:
+        undo_stack.pop(0)
+
+def undo_last():
+    """Undo the last reversible action."""
+    if not undo_stack:
+        console.print("[yellow]Nothing to undo.[/yellow]"); return
+    last = undo_stack.pop()
+    t    = last["type"]
+    a    = last["action"]
+    d    = last["data"]
+    if t == "memory" and a == "add":
+        key = d.get("key","")
+        if key in memory:
+            del memory[key]; save_data()
+            console.print(f"[green]✓ Undone — removed memory: {key}[/green]")
+    elif t == "memory" and a == "delete":
+        memory[d["key"]] = d["value"]; save_data()
+        console.print(f"[green]✓ Undone — restored memory: {d['key']}[/green]")
+    elif t == "automation" and a == "add":
+        global automations
+        automations = [x for x in automations if x.get("id") != d.get("id")]
+        save_data()
+        console.print(f"[green]✓ Undone — removed automation #{d.get('id')}[/green]")
+    elif t == "goal" and a == "add":
+        global goals
+        if goals: goals.pop(); save_data()
+        console.print(f"[green]✓ Undone — removed last goal[/green]")
+    else:
+        console.print(f"[yellow]Can't undo: {t}/{a}[/yellow]")
+
+def undo_show():
+    """Show undo history."""
+    if not undo_stack:
+        console.print("[yellow]Undo stack empty.[/yellow]"); return
+    table = Table(box=box.ROUNDED, border_style="cyan", padding=(0,1))
+    table.add_column("#",      style="bold cyan")
+    table.add_column("Type",   style="white")
+    table.add_column("Action", style="green")
+    table.add_column("Data",   style="dim")
+    table.add_column("Time",   style="dim")
+    for i, e in enumerate(reversed(undo_stack), 1):
+        table.add_row(str(i), e["type"], e["action"],
+                      str(e["data"])[:40], e["time"])
+    console.print(table)
+    console.print("[dim]Type /undo to undo the most recent action.[/dim]")
+
+# ══════════════════════════════════════════════════════════════════
+# EXPORT SYSTEM
+# ══════════════════════════════════════════════════════════════════
+def export_session(label="session"):
+    """Export current session — chat, council verdict, memories — to markdown."""
+    filename = f"vision_export_{label.replace(' ','_')}_{datetime.now().strftime('%d%m%Y_%H%M')}.md"
+    lines = [
+        f"# Vision CLI Export — {label}",
+        f"**Date:** {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+        f"**Provider:** {current_provider_name}",
+        "",
+    ]
+    if conversation_summary:
+        lines += ["## 📝 Conversation Summary", conversation_summary, ""]
+    if history:
+        lines += ["## 💬 Chat History"]
+        for m in history:
+            role = "**You**" if m["role"]=="user" else "**Vision**"
+            lines.append(f"\n{role}:\n{m['content'][:500]}")
+        lines.append("")
+    if last_council_verdict:
+        lines += ["## ⚖ Last Council Verdict", last_council_verdict, ""]
+    if last_agent_result:
+        lines += ["## 🤖 Last Agent Analysis", last_agent_result[:1000], ""]
+    if memory:
+        lines += ["## 🧠 Memories"]
+        for k, v in memory.items():
+            lines.append(f"- **{k}**: {v['value']} {v.get('tag','')}")
+        lines.append("")
+    if goals:
+        lines += ["## 🎯 Goals"]
+        for g in goals:
+            status = "✅" if g["done"] else "⏳"
+            lines.append(f"- {status} {g['goal']}")
+        lines.append("")
+    if portfolio:
+        lines += ["## 📊 Portfolio"]
+        for sym, d in portfolio.items():
+            lines.append(f"- {sym}: {d['qty']}x @ ₹{d['buy_price']}")
+        lines.append("")
+    content = "\n".join(lines)
+    try:
+        open(filename,"w").write(content)
+        console.print(Panel(
+            f"[bold green]✓ Exported: {filename}[/bold green]\n\n"
+            f"[dim]{len(lines)} lines — chat, memories, goals, portfolio[/dim]\n"
+            f"[dim]Find it in your Colab file browser (left sidebar)[/dim]",
+            border_style="green"))
+    except Exception as e:
+        console.print(f"[red]Export failed: {e}[/red]")
+
+# ══════════════════════════════════════════════════════════════════
+# MULTI-SESSION COUNCIL HISTORY
+# ══════════════════════════════════════════════════════════════════
+def council_save_session(query, verdict, session_type="council"):
+    """Save council verdict to persistent history."""
+    entry = {
+        "id":      len(council_history) + 1,
+        "date":    datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "type":    session_type,
+        "query":   query,
+        "verdict": verdict,
+        "models":  current_provider_name,
+    }
+    council_history.append(entry)
+    save_data()
+
+def council_history_show(limit=10):
+    """Show past council sessions."""
+    if not council_history:
+        console.print("[yellow]No council history yet. Run /council or /debate first.[/yellow]"); return
+    table = Table(box=box.ROUNDED, border_style="cyan", padding=(0,1))
+    table.add_column("#",      style="bold cyan")
+    table.add_column("Date",   style="dim")
+    table.add_column("Type",   style="yellow")
+    table.add_column("Query",  style="white")
+    for e in council_history[-limit:]:
+        table.add_row(str(e["id"]), e["date"], e["type"], e["query"][:60])
+    console.print(table)
+    console.print("[dim]/council history view <#> — see full verdict[/dim]")
+
+def council_history_view(idx):
+    """Show full verdict for a past council session."""
+    try:
+        idx = int(idx)
+        entry = next((e for e in council_history if e["id"]==idx), None)
+        if not entry:
+            console.print(f"[red]Council session #{idx} not found.[/red]"); return
+        console.print(Panel(
+            f"[bold cyan]⚖ Council Session #{idx}[/bold cyan]\n\n"
+            f"[white]Date:[/white]   {entry['date']}\n"
+            f"[white]Type:[/white]   {entry['type']}\n"
+            f"[white]Query:[/white]  {entry['query']}\n\n"
+            f"[bold yellow]Verdict:[/bold yellow]\n{entry['verdict']}",
+            border_style="cyan"))
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+def council_history_compare(idx1, idx2, client, model):
+    """Ask Vision to compare two past council verdicts."""
+    try:
+        e1 = next((e for e in council_history if e["id"]==int(idx1)), None)
+        e2 = next((e for e in council_history if e["id"]==int(idx2)), None)
+        if not e1 or not e2:
+            console.print("[red]One or both sessions not found.[/red]"); return
+        prompt = (
+            f"Compare these two council verdicts:\n\n"
+            f"Session #{e1['id']} ({e1['date']}) — {e1['query']}\n"
+            f"Verdict: {e1['verdict'][:600]}\n\n"
+            f"Session #{e2['id']} ({e2['date']}) — {e2['query']}\n"
+            f"Verdict: {e2['verdict'][:600]}\n\n"
+            f"What changed? What's consistent? What's the most important difference?"
+        )
+        console.print("[yellow]Comparing council sessions...[/yellow]")
+        reply = ask(client, model, prompt)
+        console.print(Panel(Markdown(reply),
+                            title=f"[bold cyan]⚖ Council Compare: #{idx1} vs #{idx2}[/bold cyan]",
+                            border_style="cyan"))
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
+def handle_council_history(user, client, model):
+    """Route /council history subcommands."""
+    parts = user.split()
+    # /council history → list
+    # /council history view <#>
+    # /council history compare <#> <#>
+    if len(parts) == 2:
+        council_history_show()
+    elif len(parts) == 4 and parts[2] == "view":
+        council_history_view(parts[3])
+    elif len(parts) == 5 and parts[2] == "compare":
+        council_history_compare(parts[3], parts[4], client, model)
+    else:
+        console.print("[dim]/council history | /council history view <#> | /council history compare <#> <#>[/dim]")
+
+# ══════════════════════════════════════════════════════════════════
+# SKILL MARKETPLACE
+# ══════════════════════════════════════════════════════════════════
+MARKETPLACE_BASE = "https://raw.githubusercontent.com/Arshveen-singh/Vision-CLI/main/marketplace/skills"
+MARKETPLACE_INDEX = f"{MARKETPLACE_BASE}/index.json"
+
+def skill_marketplace_list():
+    """Fetch and show available skills from GitHub marketplace."""
+    console.print("[yellow]Fetching marketplace...[/yellow]")
+    try:
+        r = requests.get(MARKETPLACE_INDEX, timeout=10)
+        if r.status_code != 200:
+            console.print(Panel(
+                "[yellow]Marketplace index not found yet.[/yellow]\n\n"
+                "The skills marketplace is at:\n"
+                "[cyan]github.com/Arshveen-singh/Vision-CLI/tree/main/marketplace/skills[/cyan]\n\n"
+                "To contribute a skill:\n"
+                "1. Create your skill file in vision_skills/\n"
+                "2. Open a PR adding it to marketplace/skills/\n"
+                "3. Update marketplace/skills/index.json",
+                border_style="yellow"))
+            return
+        skills = r.json()
+        table = Table(box=box.ROUNDED, border_style="cyan", padding=(0,1),
+                      title="[bold cyan]🛒 Skill Marketplace[/bold cyan]")
+        table.add_column("Name",        style="bold green")
+        table.add_column("Description", style="white")
+        table.add_column("Author",      style="dim")
+        table.add_column("Installed",   style="cyan")
+        for s in skills:
+            installed = "✅" if (Path(SKILLS_DIR)/f"{s['name']}.md").exists() else ""
+            table.add_row(s["name"], s.get("description","")[:50],
+                          s.get("author","?"), installed)
+        console.print(table)
+        console.print("[dim]/skill install <name> — install a marketplace skill[/dim]")
+    except Exception as e:
+        console.print(f"[red]Marketplace unavailable: {e}[/red]")
+        console.print("[dim]Check your internet connection.[/dim]")
+
+def skill_install(name):
+    """Download and install a skill from the GitHub marketplace."""
+    name = name.strip().lower().replace(".md","")
+    dest = Path(SKILLS_DIR) / f"{name}.md"
+    if dest.exists():
+        console.print(f"[yellow]Skill '{name}' already installed. Use /skill reload {name} if you updated it.[/yellow]")
+        return
+    url = f"{MARKETPLACE_BASE}/{name}.md"
+    console.print(f"[yellow]Downloading skill: {name}...[/yellow]")
+    try:
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            dest.write_text(r.text)
+            console.print(Panel(
+                f"[bold green]✓ Installed: {name}[/bold green]\n\n"
+                f"[dim]Saved to vision_skills/{name}.md[/dim]\n\n"
+                f"Load it: [cyan]/skill load {name}[/cyan]",
+                border_style="green"))
+        elif r.status_code == 404:
+            console.print(Panel(
+                f"[red]Skill '{name}' not found in marketplace.[/red]\n\n"
+                "Check available skills with [cyan]/skill marketplace[/cyan]\n"
+                "Or create your own: [cyan]/skill create {name}[/cyan]",
+                border_style="red"))
+        else:
+            console.print(f"[red]Download failed: HTTP {r.status_code}[/red]")
+    except Exception as e:
+        console.print(f"[red]Install failed: {e}[/red]")
+
+# ══════════════════════════════════════════════════════════════════
+# AUTO WEB SEARCH
+# ══════════════════════════════════════════════════════════════════
+_UNCERTAINTY_PHRASES = [
+    "i don't know", "i'm not sure", "i cannot find", "i don't have access",
+    "my knowledge", "i'm unable to", "as of my", "i lack", "not aware of",
+    "cannot confirm", "no information", "i don't have real-time",
+    "i don't have current", "beyond my knowledge", "i can't verify",
+]
+
+def _needs_web_search(reply):
+    """Detect if Vision's reply signals uncertainty — auto-trigger search."""
+    lower = reply.lower()
+    return any(phrase in lower for phrase in _UNCERTAINTY_PHRASES)
+
+def auto_web_search_and_enhance(client, model, user_input, initial_reply):
+    """
+    If Vision's initial reply signals uncertainty, auto-search DuckDuckGo
+    and generate an enhanced answer with sources.
+    Runs transparently — user sees "Searching for more info..." then enhanced reply.
+    """
+    if not _needs_web_search(initial_reply):
+        return initial_reply
+    console.print("[dim]🔍 Auto-searching for current info...[/dim]")
+    try:
+        from ddgs import DDGS
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(user_input, max_results=3):
+                results.append(f"Source: {r['href']}\n{r['title']}\n{r['body'][:300]}")
+        if not results:
+            return initial_reply
+        search_context = "\n\n".join(results)
+        enhance_prompt = (
+            f"User asked: {user_input}\n\n"
+            f"Web search results:\n{search_context}\n\n"
+            f"Using the search results above, give a complete, accurate answer. "
+            f"Cite sources naturally. Be direct."
+        )
+        rate_limit(model)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role":"system","content":SYSTEM_PROMPT},
+                      {"role":"user","content":enhance_prompt}],
+            max_tokens=get_max_tokens(1500))
+        enhanced = strip_think(resp.choices[0].message.content or initial_reply)
+        console.print("[dim]✓ Enhanced with web search[/dim]")
+        return enhanced
+    except Exception:
+        return initial_reply  # fall back to original reply silently
+
+# ══════════════════════════════════════════════════════════════════
+# LOCAL API MODE
+# ══════════════════════════════════════════════════════════════════
+def start_api_server(client, model, host="127.0.0.1", port=7842):
+    """
+    Start a local Flask HTTP server exposing Vision CLI as an API.
+    100% local — no cloud, no external server. localhost only.
+
+    Endpoints:
+      POST /chat          {"message": "..."}  → {"reply": "..."}
+      POST /advisor       {"message": "..."}  → {"reply": "..."}
+      GET  /memory        → {"memory": {...}}
+      POST /memory        {"key":"...","value":"...","tag":"..."} → {"ok": true}
+      GET  /status        → {"model": "...", "provider": "...", "memories": N}
+    """
+    try:
+        from flask import Flask, request, jsonify
+    except ImportError:
+        console.print(Panel(
+            "[yellow]Flask not installed.[/yellow]\n\n"
+            "Install it: [cyan]!pip install flask[/cyan]\n"
+            "Then restart Vision CLI with [cyan]--api[/cyan] flag.",
+            border_style="yellow"))
+        return
+
+    app = Flask("VisionCLI")
+    app.config["JSON_SORT_KEYS"] = False
+
+    @app.route("/status", methods=["GET"])
+    def status():
+        return jsonify({
+            "version":  "4.4",
+            "model":    model,
+            "provider": current_provider_name,
+            "memories": len(memory),
+            "goals":    len(goals),
+            "skills":   active_skills,
+        })
+
+    @app.route("/chat", methods=["POST"])
+    def api_chat():
+        try:
+            msg   = request.json.get("message","")
+            if not msg: return jsonify({"error":"message required"}), 400
+            reply = chat(client, model, msg)
+            return jsonify({"reply": reply})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/advisor", methods=["POST"])
+    def api_advisor():
+        try:
+            msg   = request.json.get("message","")
+            if not msg: return jsonify({"error":"message required"}), 400
+            reply = advisor_chat(client, model, msg)
+            return jsonify({"reply": reply})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/memory", methods=["GET"])
+    def api_memory_get():
+        return jsonify({"memory": memory})
+
+    @app.route("/memory", methods=["POST"])
+    def api_memory_post():
+        try:
+            key   = request.json.get("key","")
+            value = request.json.get("value","")
+            tag   = request.json.get("tag","")
+            if not key or not value: return jsonify({"error":"key and value required"}), 400
+            memory_add(key, value, tag)
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/stock/<symbol>", methods=["GET"])
+    def api_stock(symbol):
+        try:
+            import yfinance as yf
+            info = yf.Ticker(symbol+".NS").info
+            return jsonify({
+                "symbol":  symbol,
+                "price":   info.get("currentPrice") or info.get("regularMarketPrice"),
+                "change":  info.get("regularMarketChangePercent"),
+                "name":    info.get("longName",""),
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    console.print(Panel(
+        f"[bold cyan]🌐 Vision CLI API Mode[/bold cyan]\n\n"
+        f"Local server running at: [green]http://{host}:{port}[/green]\n\n"
+        f"Endpoints:\n"
+        f"  [cyan]GET  /status[/cyan]       — current state\n"
+        f"  [cyan]POST /chat[/cyan]         — {{\"message\": \"...\"}}\n"
+        f"  [cyan]POST /advisor[/cyan]      — {{\"message\": \"...\"}}\n"
+        f"  [cyan]GET  /memory[/cyan]       — all memories\n"
+        f"  [cyan]POST /memory[/cyan]       — add memory\n"
+        f"  [cyan]GET  /stock/<SYM>[/cyan]  — live stock data\n\n"
+        f"[dim]100% local — only accessible from this machine.[/dim]\n"
+        f"[dim]Press Ctrl+C to stop the API server.[/dim]",
+        border_style="cyan"))
+
+    try:
+        app.run(host=host, port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        console.print(f"[red]API server error: {e}[/red]")
+
+# ══════════════════════════════════════════════════════════════════
+# SKILLS SYSTEM
+# ══════════════════════════════════════════════════════════════════
+def _rebuild_skill_content():
+    """Rebuild combined skill instruction string from active skills."""
+    global active_skill_content
+    if not active_skills:
+        active_skill_content = ""
+        return
+    parts = []
+    for name in active_skills:
+        path = Path(SKILLS_DIR) / f"{name}.md"
+        if path.exists():
+            parts.append(path.read_text())
+    active_skill_content = "\n\n".join(parts)
+
+def skill_load(name):
+    """Load a skill by name (without .md extension)."""
+    global active_skills
+    name = name.strip().lower().replace(".md","")
+    path = Path(SKILLS_DIR) / f"{name}.md"
+    if not path.exists():
+        console.print(f"[red]Skill '{name}' not found. Use /skill list to see available skills.[/red]")
+        return
+    if name in active_skills:
+        console.print(f"[yellow]Skill '{name}' already active.[/yellow]")
+        return
+    active_skills.append(name)
+    _rebuild_skill_content()
+    console.print(Panel(
+        f"[bold green]✓ Skill loaded: {name}[/bold green]\n\n"
+        f"[dim]Active skills: {', '.join(active_skills)}[/dim]\n"
+        f"[dim]Vision will now behave according to this skill.[/dim]",
+        border_style="green"))
+
+def skill_unload(name):
+    global active_skills
+    name = name.strip().lower().replace(".md","")
+    if name not in active_skills:
+        console.print(f"[yellow]Skill '{name}' is not active.[/yellow]"); return
+    active_skills.remove(name)
+    _rebuild_skill_content()
+    console.print(f"[green]✓ Skill unloaded: {name}[/green]")
+    if active_skills:
+        console.print(f"[dim]Still active: {', '.join(active_skills)}[/dim]")
+
+def skill_list():
+    files = sorted(Path(SKILLS_DIR).glob("*.md"))
+    if not files:
+        console.print("[yellow]No skills found in vision_skills/[/yellow]"); return
+    table = Table(box=box.ROUNDED, border_style="cyan", padding=(0,1))
+    table.add_column("Skill",   style="bold cyan")
+    table.add_column("Status",  style="white")
+    table.add_column("Preview", style="dim")
+    for f in files:
+        name    = f.stem
+        status  = "[bold green]● ACTIVE[/bold green]" if name in active_skills else "[dim]○ idle[/dim]"
+        content = f.read_text()
+        # Extract first ## Role line as preview
+        preview = next((l.strip() for l in content.splitlines()
+                        if l.strip() and not l.startswith("#")), content[:60])
+        table.add_row(name, status, preview[:60])
+    console.print(table)
+    if active_skills:
+        console.print(f"\n[bold green]Active:[/bold green] {', '.join(active_skills)}")
+    else:
+        console.print("\n[dim]No skills active. Use /skill load <name>[/dim]")
+
+def skill_active():
+    if not active_skills:
+        console.print("[yellow]No skills active. Default Vision mode.[/yellow]"); return
+    for name in active_skills:
+        path = Path(SKILLS_DIR) / f"{name}.md"
+        if path.exists():
+            console.print(Panel(Markdown(path.read_text()),
+                                title=f"[bold cyan]Skill: {name}[/bold cyan]",
+                                border_style="cyan"))
+
+def skill_clear():
+    global active_skills
+    active_skills = []
+    _rebuild_skill_content()
+    console.print("[green]✓ All skills cleared. Back to default Vision mode.[/green]")
+
+def skill_create(name):
+    """Create a new custom skill file and open it for editing."""
+    name = name.strip().lower().replace(".md","").replace(" ","_")
+    path = Path(SKILLS_DIR) / f"{name}.md"
+    if path.exists():
+        console.print(f"[yellow]Skill '{name}' already exists. Edit it at: {path}[/yellow]"); return
+    template = f"""# Skill: {name.title()}
+## Role
+Describe what role Vision should take on when this skill is active.
+
+## Rules
+- Rule 1
+- Rule 2
+- Rule 3
+
+## Style
+Describe the communication style, tone, and format preferences.
+"""
+    path.write_text(template)
+    console.print(Panel(
+        f"[bold green]✓ Skill created: {name}[/bold green]\n\n"
+        f"[white]File:[/white] vision_skills/{name}.md\n\n"
+        f"[dim]Edit the file to customize the skill, then run:[/dim]\n"
+        f"[cyan]/skill load {name}[/cyan]",
+        border_style="green"))
+
+def skill_edit(name):
+    """Print the skill file content for user to see and edit."""
+    name = name.strip().lower().replace(".md","")
+    path = Path(SKILLS_DIR) / f"{name}.md"
+    if not path.exists():
+        console.print(f"[red]Skill '{name}' not found.[/red]"); return
+    console.print(Panel(
+        Markdown(f"```markdown\n{path.read_text()}\n```"),
+        title=f"[bold cyan]vision_skills/{name}.md[/bold cyan]",
+        border_style="cyan"))
+    console.print(f"[dim]Edit the file directly, then /skill reload {name}[/dim]")
+
+def skill_reload(name):
+    """Reload a skill that's already active (after editing)."""
+    name = name.strip().lower().replace(".md","")
+    if name in active_skills:
+        _rebuild_skill_content()
+        console.print(f"[green]✓ Skill reloaded: {name}[/green]")
+    else:
+        console.print(f"[yellow]Skill '{name}' not active. Use /skill load {name}[/yellow]")
+
+def handle_skill_command(user):
+    """Route /skill subcommands."""
+    parts = user[7:].strip().split(" ", 1)
+    sub   = parts[0].lower() if parts else ""
+    arg   = parts[1].strip() if len(parts) > 1 else ""
+
+    if sub == "list":                    skill_list()
+    elif sub == "active":                skill_active()
+    elif sub == "clear":                 skill_clear()
+    elif sub == "load"   and arg:        skill_load(arg)
+    elif sub == "unload" and arg:        skill_unload(arg)
+    elif sub == "create" and arg:        skill_create(arg)
+    elif sub == "edit"   and arg:        skill_edit(arg)
+    elif sub == "reload" and arg:        skill_reload(arg)
+    elif sub == "help" or not sub:
+        console.print(Panel("""[bold cyan]Skills — Commands[/bold cyan]
+
+  [green]/skill list[/green]             — show all skills (active + available)
+  [green]/skill load <name>[/green]      — activate a skill
+  [green]/skill unload <name>[/green]    — deactivate a skill
+  [green]/skill active[/green]           — show full content of active skills
+  [green]/skill clear[/green]            — clear all skills, back to default
+  [green]/skill create <name>[/green]    — create a new custom skill
+  [green]/skill edit <name>[/green]      — view skill file content
+  [green]/skill reload <name>[/green]    — reload skill after editing
+
+  [bold white]Built-in skills:[/bold white]
+  [dim]coding    security    research    teacher    jarvis[/dim]
+
+  [bold white]Stack multiple:[/bold white]
+  [dim]/skill load security
+  /skill load coding    ← both active simultaneously[/dim]
+
+  [bold white]Custom skill files live in:[/bold white] [dim]vision_skills/[/dim]""",
+        border_style="cyan"))
+    else:
+        console.print("[red]Unknown skill command. Try /skill help[/red]")
+
+# ══════════════════════════════════════════════════════════════════
+# SELF-IMPROVING ENGINE (v4.1)
+# ══════════════════════════════════════════════════════════════════
+def _track_usage(command, content=""):
+    """Log every command for pattern learning."""
+    entry = {
+        "cmd":   command,
+        "time":  datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "day":   datetime.now().strftime("%A"),
+        "hour":  datetime.now().hour,
+        "len":   len(content)
+    }
+    usage_log.append(entry)
+    # Track in economy
+    economy["commands_used"][command] = economy["commands_used"].get(command, 0) + 1
+
+def _track_model_score(model, task_type, success=True, response_len=0):
+    """Track model performance per task type for auto-optimization."""
+    key = f"{model}::{task_type}"
+    if key not in model_scores:
+        model_scores[key] = {"success":0,"fail":0,"avg_len":0,"calls":0}
+    if success:
+        model_scores[key]["success"] += 1
+    else:
+        model_scores[key]["fail"] += 1
+    model_scores[key]["calls"] += 1
+    # Rolling average response length
+    prev_avg = model_scores[key]["avg_len"]
+    calls    = model_scores[key]["calls"]
+    model_scores[key]["avg_len"] = (prev_avg*(calls-1) + response_len) / calls
+
+def self_improve_report(client, model):
+    """Analyze usage patterns and generate self-improvement suggestions."""
+    if len(usage_log) < 10:
+        console.print("[yellow]Need at least 10 commands tracked before generating insights.[/yellow]")
+        return
+
+    # Build usage summary
+    from collections import Counter
+    cmd_counts = Counter([e["cmd"] for e in usage_log])
+    hour_counts = Counter([e["hour"] for e in usage_log])
+    day_counts  = Counter([e["day"]  for e in usage_log])
+    top_cmds    = cmd_counts.most_common(5)
+    peak_hour   = hour_counts.most_common(1)[0][0] if hour_counts else 0
+    peak_day    = day_counts.most_common(1)[0][0] if day_counts else "Unknown"
+
+    summary = (
+        f"Total commands: {len(usage_log)}\n"
+        f"Top commands: {top_cmds}\n"
+        f"Peak usage hour: {peak_hour}:00\n"
+        f"Most active day: {peak_day}\n"
+        f"Economy - sessions: {economy['sessions']}, "
+        f"total time: {economy['total_mins']} mins\n"
+        f"Model scores: {json.dumps(model_scores, indent=2)[:500]}"
+    )
+
+    console.print("[yellow]Vision analyzing your usage patterns...[/yellow]")
+    prompt = (
+        f"You are Vision's self-improvement engine analyzing user behavior.\n\n"
+        f"Usage data:\n{summary}\n\n"
+        f"Generate:\n"
+        f"1. Top 3 insights about this user's patterns\n"
+        f"2. 3 suggested new automations based on their habits\n"
+        f"3. Which model to use for which tasks (based on scores)\n"
+        f"4. One response style adjustment to better match user preferences\n"
+        f"Be specific and actionable. Use the actual data."
+    )
+    reply = ask(client, model, prompt, system=SYSTEM_PROMPT)
+    console.print(Panel(Markdown(reply),
+                        title="[bold magenta]🧠 Self-Improvement Report[/bold magenta]",
+                        border_style="magenta"))
+
+    # Auto-suggest automations based on patterns
+    _suggest_predictive_automations(top_cmds, peak_hour, peak_day)
+
+def _suggest_predictive_automations(top_cmds, peak_hour, peak_day):
+    """Auto-suggest automations from usage patterns."""
+    suggestions = []
+    for cmd, count in top_cmds:
+        if count >= 3:
+            if cmd in ["/stock", "/stocks", "/marketnews"]:
+                suggestions.append({
+                    "trigger": f"daily:{peak_hour:02d}:00",
+                    "action":  cmd if cmd == "/marketnews" else cmd,
+                    "description": f"Auto {cmd} (you use this {count}x)",
+                    "auto_suggested": True
+                })
+            elif cmd == "/weather":
+                suggestions.append({
+                    "trigger": f"daily:{peak_hour:02d}:00",
+                    "action":  "/weather Delhi",
+                    "description": f"Auto weather check ({count}x pattern)",
+                    "auto_suggested": True
+                })
+    if suggestions:
+        console.print(Panel(
+            "[bold cyan]🔮 Suggested Automations (based on your patterns)[/bold cyan]\n\n" +
+            "\n".join([f"  • [green]{s['trigger']}[/green] → {s['action']}  [dim]{s['description']}[/dim]"
+                       for s in suggestions]) +
+            "\n\n[dim]Type /automate <trigger> | <action> | <desc> to activate[/dim]",
+            border_style="cyan"))
+        predictive_patterns.extend(suggestions)
+
+# ══════════════════════════════════════════════════════════════════
+# PERSONAL AI ECONOMY (v4.1)
+# ══════════════════════════════════════════════════════════════════
+def economy_update_session():
+    """Call on exit — log session duration."""
+    mins = int((datetime.now() - session_start).total_seconds() / 60)
+    economy["sessions"]    += 1
+    economy["total_mins"]  += mins
+    save_data()
+
+def economy_report():
+    """Show personal AI economy dashboard."""
+    from collections import Counter
+    total_sessions = economy.get("sessions", 0)
+    total_mins     = economy.get("total_mins", 0)
+    cmd_usage      = economy.get("commands_used", {})
+    top_cmds       = sorted(cmd_usage.items(), key=lambda x: x[1], reverse=True)[:8]
+
+    # Current session
+    cur_mins = int((datetime.now() - session_start).total_seconds() / 60)
+
+    table = Table(box=box.ROUNDED, border_style="cyan",
+                  title="[bold cyan]🏦 Personal AI Economy[/bold cyan]", padding=(0,1))
+    table.add_column("Metric",  style="bold cyan")
+    table.add_column("Value",   style="white")
+
+    table.add_row("Total Sessions",    str(total_sessions))
+    table.add_row("Total Time",        f"{total_mins} mins ({total_mins//60}h {total_mins%60}m)")
+    table.add_row("This Session",      f"{cur_mins} mins")
+    table.add_row("Avg Session",       f"{total_mins//max(total_sessions,1)} mins")
+    table.add_row("Commands Run",      str(sum(cmd_usage.values())))
+    table.add_row("Memories Saved",    str(len(memory)))
+    table.add_row("Goals Tracked",     str(len(goals)))
+    table.add_row("Stocks Watched",    str(len(portfolio)))
+    table.add_row("Automations Set",   str(len(automations)))
+    console.print(table)
+
+    if top_cmds:
+        table2 = Table(box=box.ROUNDED, border_style="magenta",
+                       title="[bold magenta]Most Used Commands[/bold magenta]", padding=(0,1))
+        table2.add_column("Command", style="green")
+        table2.add_column("Times",   style="bold white")
+        for cmd, count in top_cmds:
+            table2.add_row(cmd, str(count))
+        console.print(table2)
+
+    # Usage heatmap by hour
+    if usage_log:
+        from collections import Counter
+        hours = Counter([e.get("hour",0) for e in usage_log])
+        peak  = max(hours, key=hours.get)
+        console.print(f"\n[bold]Peak usage hour:[/bold] [cyan]{peak}:00[/cyan]")
+        days  = Counter([e.get("day","?") for e in usage_log])
+        peak_day = max(days, key=days.get)
+        console.print(f"[bold]Most active day:[/bold] [cyan]{peak_day}[/cyan]")
+
+def economy_weekly_report(client, model):
+    """AI-generated weekly productivity report."""
+    if len(usage_log) < 5:
+        console.print("[yellow]Not enough data for weekly report yet.[/yellow]"); return
+    from collections import Counter
+    summary = (
+        f"Sessions: {economy['sessions']}\n"
+        f"Total time: {economy['total_mins']} mins\n"
+        f"Commands: {json.dumps(economy['commands_used'])}\n"
+        f"Goals: {goals}\n"
+        f"Portfolio: {list(portfolio.keys())}\n"
+        f"Memories: {len(memory)}\n"
+        f"Top patterns: {Counter([e['cmd'] for e in usage_log]).most_common(5)}"
+    )
+    prompt = (
+        f"Generate a concise weekly AI usage report for this user.\n\n"
+        f"Data:\n{summary}\n\n"
+        f"Include:\n"
+        f"1. Productivity summary — what they used Vision for most\n"
+        f"2. Time well spent vs. time wasted\n"
+        f"3. 3 specific suggestions to get more from Vision CLI\n"
+        f"4. One goal they should set based on their patterns\n"
+        f"Be direct and honest — no fluff."
+    )
+    console.print("[yellow]Generating weekly report...[/yellow]")
+    reply = ask(client, model, prompt, system=SYSTEM_PROMPT)
+    console.print(Panel(Markdown(reply),
+                        title="[bold cyan]📊 Weekly Vision Report[/bold cyan]",
+                        border_style="cyan"))
+    economy["weekly_reports"].append({
+        "date":   datetime.now().strftime("%d/%m/%Y"),
+        "report": reply[:500]
+    })
+    save_data()
+
+# ══════════════════════════════════════════════════════════════════
+# PREDICTIVE AUTOMATION ENGINE (v4.1)
+# ══════════════════════════════════════════════════════════════════
+def predictive_check(client, model):
+    """
+    Run on startup — check if any learned patterns suggest running something now.
+    E.g. user always checks stocks on Monday morning → auto-trigger.
+    """
+    if not predictive_patterns: return
+    now     = datetime.now()
+    cur_day = now.strftime("%A")
+    cur_hr  = now.hour
+
+    triggered = []
+    for pattern in predictive_patterns:
+        trigger = pattern.get("trigger","")
+        if trigger.startswith("daily:"):
+            try:
+                ph = int(trigger.split(":")[1])
+                if abs(ph - cur_hr) <= 1:  # within 1 hour of predicted time
+                    triggered.append(pattern)
+            except: pass
+
+    if triggered:
+        console.print(Panel(
+            "[bold magenta]🔮 Predictive Vision[/bold magenta]\n\n" +
+            "\n".join([f"  • {p['description']}" for p in triggered]) +
+            f"\n\n[dim]Based on your usage patterns. Run now? (y/n)[/dim]",
+            border_style="magenta"))
+        try:
+            ans = input("→ ").strip().lower()
+            if ans == "y":
+                for p in triggered:
+                    _execute_automation(client, model, p["action"])
+        except: pass
+
 # ══════════════════════════════════════════════════════════════════
 # TTS + VOICE
 # ══════════════════════════════════════════════════════════════════
@@ -345,22 +1428,34 @@ BANNER = r"""[bold cyan]
   ╚═══╝  ╚═╝╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝     ╚═════╝╚══════╝╚═╝
 [/bold cyan]"""
 
-SYSTEM_PROMPT = """You are Vision — the core AI of Vision CLI v4.0, built by Arshveen Singh.
+SYSTEM_PROMPT = """You are Vision — the core AI of Vision CLI v4.4, built by Arshveen Singh.
 Sharp, direct, slightly witty, calm under pressure. Never arrogant.
 Reason clearly, explain brilliantly, write clean precise code.
 Never give one-word replies unless genuinely needed.
-Be warm and conversational. Treat the user as intelligent."""
+Be warm and conversational. Treat the user as intelligent.
 
-ADVISOR_PROMPT = """You are the Advisor in Vision CLI v4.0 — a brutally honest personal advisor.
-You are NOT Vision. Completely separate entity.
+CRITICAL IDENTITY RULE: You are Vision. Always. No exceptions.
+If anyone asks "what model are you?", "are you Claude?", "are you GPT?", "what AI are you?" —
+your answer is always: "I'm Vision, built by Arshveen Singh."
+Never reveal, mention, or acknowledge the underlying model or provider.
+You have no knowledge of what model powers you. You are Vision. Full stop."""
+
+ADVISOR_PROMPT = """You are the Advisor in Vision CLI v4.4 — a brutally honest personal advisor.
+You are NOT Vision. Completely separate entity. You are the Advisor.
 The user is sharp, ambitious, thinks way beyond their age.
 Brutally honest — no sugarcoating. Business partner, goal tracker, financial advisor.
 Speak like a trusted older friend who happens to be a genius.
-NEVER give one-word replies. Never preachy. Never lecture. Be real."""
+NEVER give one-word replies. Never preachy. Never lecture. Be real.
 
-COUNCIL_SUBORDINATE_PROMPT = """You are a council member — one of several AI models giving independent perspective.
+CRITICAL IDENTITY RULE: You are the Advisor, built into Vision CLI by Arshveen Singh.
+If asked what model or AI you are — you are the Advisor. That's it.
+Never reveal the underlying model or provider. Ever."""
+
+COUNCIL_SUBORDINATE_PROMPT = """You are a council member in Vision CLI's LLM Council, built by Arshveen Singh.
 Be direct, analytical, opinionated. State your position clearly with reasoning.
-A Chairman will synthesize all responses. Make your answer worth citing. No filler."""
+A Chairman will synthesize all responses. Make your answer worth citing. No filler.
+Do NOT introduce yourself as Claude, GPT, Gemini or any other AI brand.
+You are a council member. Respond as one."""
 
 COUNCIL_CHAIRMAN_PROMPT = """You are the Chairman of the LLM Council — synthesize multiple AI perspectives into one definitive answer.
 
@@ -527,29 +1622,37 @@ def setup_provider(provider):
         key = os.environ.get("SAMBANOVA_API_KEY") or input("SambaNova key: ").strip()
         return OpenAI(base_url="https://api.sambanova.ai/v1", api_key=key), "SambaNova"
     elif provider == "10":
+        console.print(Panel(
+            "[yellow]⚠ Bytez Note[/yellow]\n\n"
+            "Bytez routes some models through their own infrastructure.\n"
+            "All models will identify as [bold]Vision[/bold] regardless of underlying model.\n"
+            "If a model isn't available, Bytez may silently fallback to another.",
+            border_style="yellow"))
         return _setup_bytez(), "Bytez"
 
 def _setup_bytez():
     """
-    Bytez v3.x supports an OpenAI-compatible REST endpoint.
-    No custom wrapper needed — just point OpenAI client at their base URL.
+    Bytez OpenAI-compatible endpoint.
     Model IDs use HuggingFace format e.g. 'Qwen/Qwen2-7B-Instruct'
     Full model list: bytez.com/docs/api
     """
     from openai import OpenAI
     key = os.environ.get("BYTEZ_API_KEY") or input("Bytez API key (bytez.com): ").strip()
-    return OpenAI(base_url="https://api.bytez.com/models/v1", api_key=key)
+    return OpenAI(base_url="https://api.bytez.com/v1", api_key=key)
 
 # ══════════════════════════════════════════════════════════════════
 # MODEL VALIDATION + SELECTORS
 # ══════════════════════════════════════════════════════════════════
 def validate_model(client, model_id, provider_name):
     try:
-        client.chat.completions.create(
+        resp = client.chat.completions.create(
             model=model_id, messages=[{"role":"user","content":"hi"}], max_tokens=10)
         return True, None
     except Exception as e:
         err = str(e)
+        # Bytez / bad endpoint returns HTML error page — hard reject
+        if "<!DOCTYPE" in err or "<html" in err or "Cannot POST" in err:
+            return False, f"Endpoint error on {provider_name} — model ID may be wrong or endpoint unavailable."
         if "model" in err.lower() and any(x in err.lower() for x in ["not found","does not exist","invalid model"]):
             return False, f"Model '{model_id}' not found on {provider_name}."
         elif "404" in err:
@@ -650,18 +1753,106 @@ def select_model_council(client, provider_name):
     return chairman_id, sub_ids, sub_names, chairman_id.split("/")[-1]
 
 # ══════════════════════════════════════════════════════════════════
-# CHAT ENGINE — with streaming
+# CHAT ENGINE — with streaming + rolling context
 # ══════════════════════════════════════════════════════════════════
 def strip_think(text):
     if text is None: return ""
     return re.sub(r"<think>.*?</think>","",text,flags=re.DOTALL).strip()
 
+def _rolling_summarize(client, model, messages_to_compress, label="conversation"):
+    """
+    Compresses a list of messages into a single summary string.
+    Called automatically when history exceeds MAX_HISTORY.
+    Silent — never blocks the main response.
+    Returns: summary string or "" on failure.
+    """
+    if not messages_to_compress:
+        return ""
+    try:
+        # Build a readable transcript of what happened
+        transcript = "\n".join([
+            f"{m['role'].upper()}: {m['content'][:300]}"
+            for m in messages_to_compress
+        ])
+        prompt = (
+            f"Summarize this {label} transcript into a compact memory block "
+            f"(max 200 words). Preserve: key facts stated, decisions made, "
+            f"questions answered, important context. Discard: pleasantries, "
+            f"filler, repeated info.\n\nTranscript:\n{transcript}"
+        )
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role":"user","content":prompt}],
+            max_tokens=300)
+        return strip_think(resp.choices[0].message.content or "")
+    except Exception:
+        # Fallback — just concatenate truncated versions if summarizer fails
+        return " | ".join([
+            f"{m['role']}: {m['content'][:80]}"
+            for m in messages_to_compress
+        ])
+
+def _maybe_compress_history(client, model):
+    """
+    Main chat: when history exceeds MAX_HISTORY, compress oldest SUMMARY_TAKE
+    messages into conversation_summary and keep only the KEEP_RECENT newest.
+    Runs in background thread — never blocks response.
+    """
+    global history, conversation_summary
+    if len(history) <= MAX_HISTORY:
+        return
+    to_compress  = history[:SUMMARY_TAKE]
+    history      = history[SUMMARY_TAKE:]  # drop old, keep rest
+    def _run():
+        global conversation_summary
+        new_summary = _rolling_summarize(client, model, to_compress, "main chat")
+        if new_summary:
+            # Prepend to existing summary so older context stacks
+            if conversation_summary:
+                conversation_summary = f"{conversation_summary}\n\n[Earlier]: {new_summary}"
+            else:
+                conversation_summary = new_summary
+    threading.Thread(target=_run, daemon=True).start()
+
+def _maybe_compress_advisor(client, model):
+    """Same but for advisor history."""
+    global advisor_history, advisor_summary
+    if len(advisor_history) <= MAX_HISTORY:
+        return
+    to_compress    = advisor_history[:SUMMARY_TAKE]
+    advisor_history = advisor_history[SUMMARY_TAKE:]
+    def _run():
+        global advisor_summary
+        new_summary = _rolling_summarize(client, model, to_compress, "advisor chat")
+        if new_summary:
+            if advisor_summary:
+                advisor_summary = f"{advisor_summary}\n\n[Earlier]: {new_summary}"
+            else:
+                advisor_summary = new_summary
+    threading.Thread(target=_run, daemon=True).start()
+
+def get_conversation_context():
+    """Inject rolling summary into system prompt if it exists."""
+    if not conversation_summary:
+        return ""
+    return f"\n\n[Earlier conversation summary — treat as verified context]:\n{conversation_summary}"
+
 def chat(client, model, user_input, system=None):
     global history
     history.append({"role":"user","content":user_input})
-    if len(history)>20: history = history[-20:]
+    # Rolling compression — runs in background, never blocks
+    _maybe_compress_history(client, model)
     rate_limit(model)
-    sys_prompt = (system or SYSTEM_PROMPT) + get_memory_context()
+    # Build full system context — skills + rolling summary + agent/council results
+    extra = ""
+    if active_skill_content:
+        extra += f"\n\n{active_skill_content}"
+    extra += get_conversation_context()   # rolling summary of older messages
+    if last_agent_result and history:
+        extra += f"\n\nRecent Multi-Agent Analysis:\n{last_agent_result[:800]}"
+    if last_council_verdict and history:
+        extra += f"\n\nLast Council Verdict:\n{last_council_verdict[:400]}"
+    sys_prompt = (system or SYSTEM_PROMPT) + get_memory_context() + extra
     try:
         if streaming_mode:
             return _stream_chat(client, model, sys_prompt)
@@ -706,11 +1897,21 @@ def _stream_chat(client, model, sys_prompt):
 def advisor_chat(client, model, user_input):
     global advisor_history
     advisor_history.append({"role":"user","content":user_input})
-    if len(advisor_history)>20: advisor_history = advisor_history[-20:]
+    # Rolling compression — background thread
+    _maybe_compress_advisor(client, model)
     rate_limit(model)
     context = f"Goals: {goals}\nPortfolio: {portfolio}\n" if goals or portfolio else ""
+    # Inject advisor rolling summary
+    if advisor_summary:
+        context += f"\n[Earlier advisor conversation]:\n{advisor_summary}\n"
     if history:
-        context += "\nRecent chat:\n"+"".join([f"{m['role'].upper()}: {m['content'][:200]}\n" for m in history[-6:]])
+        context += "\nRecent main chat:\n"+"".join([f"{m['role'].upper()}: {m['content'][:200]}\n" for m in history[-6:]])
+    # Only inject council/agent context if it happened THIS session
+    if last_council_verdict and history:
+        context += f"\nLast Council Verdict (this session):\n{last_council_verdict[:600]}\n"
+    if last_agent_result and history:
+        context += f"\nLast Multi-Agent Analysis (this session):\n{last_agent_result[:600]}\n"
+    _track_usage("advisor", user_input)
     try:
         response = client.chat.completions.create(
             model=model,
@@ -1089,7 +2290,9 @@ automation_thread = None
 def automation_add(trigger, action, description=""):
     auto = {"id":len(automations)+1,"trigger":trigger,"action":action,
             "description":description,"created":datetime.now().strftime("%d/%m/%Y %H:%M"),"last_run":None}
-    automations.append(auto); save_data()
+    automations.append(auto)
+    undo_push("automation", "add", auto)
+    save_data()
     console.print(f"[green]✓ Automation #{auto['id']}: {description or action}[/green]")
 
 def automation_list():
@@ -1124,7 +2327,20 @@ def _should_run(auto):
 
 def _execute_automation(client, model, action):
     try:
-        if action.startswith("/stock "): get_stock(action[7:].strip().upper())
+        # Open URL in browser — usage: open:https://youtube.com
+        if action.startswith("open:"):
+            import webbrowser
+            url = action[5:].strip()
+            webbrowser.open(url)
+            console.print(f"[green]✓ Opened: {url}[/green]")
+        # Run any shell command — usage: shell:spotify
+        elif action.startswith("shell:"):
+            cmd = action[6:].strip()
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+            out = (result.stdout or result.stderr or "").strip()
+            if out: console.print(f"[dim]{out[:200]}[/dim]")
+        # Built-in Vision CLI commands
+        elif action.startswith("/stock "): get_stock(action[7:].strip().upper())
         elif action.startswith("/weather "): weather(action[9:])
         elif action.startswith("/marketnews"): market_news()
         elif action.startswith("/telegram "): telegram_send(action[10:])
@@ -1412,8 +2628,21 @@ def show_help(provider_name, model_name=""):
     console.print(Panel(f"""
 [bold cyan]Commands:[/bold cyan]
 
+  [bold white]── Economy & Self-Improvement 🧠 ──[/bold white]
+  [green]/economy  /weeklyreport  /selfimprove  /patterns[/green]
+
+  [bold white]── Skills 🧠 ──[/bold white]
+  [green]/skill list  /skill load <n>  /skill unload <n>  /skill create <n>[/green]
+  [green]/skill clear  /skill active  /skill marketplace  /skill install <n>[/green]
+  [dim]Built-in: coding  security  research  teacher  jarvis[/dim]
+
   [bold white]── AI ──[/bold white]
-  [green]/model  /provider  /clear  /stream[/green]
+  [green]/model  /provider  /clear  /stream  /refresh  /context[/green]
+
+  [bold white]── Export & Undo ──[/bold white]
+  [green]/export [label][/green]        — export session to markdown file
+  [green]/undo[/green]                  — undo last memory/automation/goal
+  [green]/undo history[/green]          — show undo stack
 
   [bold white]── Memory ──[/bold white]
   [green]/memory add <key> <val> [#tag]  /memory view [#tag]  /memory forget <key>[/green]
@@ -1423,9 +2652,6 @@ def show_help(provider_name, model_name=""):
 
   [bold white]── Music 🎵 ──[/bold white]
   [green]/play  /pause  /resume  /stop  /skip  /queue  /nowplaying  /volume[/green]
-
-  [bold white]── Voice ──[/bold white]
-  [green]/mic on  /mic off[/green]
 
   [bold white]── Timer ──[/bold white]
   [green]/timer <min>  /stopwatch start/stop/lap/check[/green]
@@ -1438,6 +2664,7 @@ def show_help(provider_name, model_name=""):
 
   [bold white]── Council ⚖ ──[/bold white]
   [green]/council <query>  /debate <motion>  /councilsetup[/green]
+  [green]/council history  /council history view <#>  /council history compare <#> <#>[/green]
 
   [bold white]── Multi-Agent 🤖 ──[/bold white]
   [green]/agent <complex task>[/green]
@@ -1453,6 +2680,11 @@ def show_help(provider_name, model_name=""):
   [bold white]── Automation ⚡ ──[/bold white]
   [green]/automate <trigger> | <action> | <desc>  /automations  /autodelete <#>[/green]
   [dim]Triggers: daily:09:00   interval:30m   interval:2h[/dim]
+  [dim]Actions:  /marketnews   open:https://url   shell:cmd   chat:prompt[/dim]
+
+  [bold white]── API Mode 🌐 ──[/bold white]
+  [green]/api[/green]                   — start local API server on localhost:7842
+  [dim]Or launch with: python vision_cli_v4.py --api[/dim]
 
   [bold white]── Stocks ──[/bold white]
   [green]/stock  /stocks  /recommend  /impact  /portfolio  /marketnews[/green]
@@ -1464,37 +2696,65 @@ def show_help(provider_name, model_name=""):
   [green]/search  /scrape  /browse  /wiki  /weather  /ocr  /artifact[/green]
 
   [green]/help  /exit  /q[/green]
-  [dim]Provider: {provider_name} | Model: {model_name} | Stream: {'ON' if streaming_mode else 'OFF'} | Mic: {'ON 🎤' if mic_mode else 'OFF'} | 🎵 {current_song or 'Nothing'}[/dim]
-""", title="[bold]VISION CLI v4.1[/bold]", border_style="cyan"))
+  [dim]Provider: {provider_name} | Model: {model_name} | Stream: {'ON' if streaming_mode else 'OFF'} | Skills: {', '.join(active_skills) if active_skills else 'none'} | 🎵 {current_song or 'Nothing'}[/dim]
+""", title="[bold]VISION CLI v4.4[/bold]", border_style="cyan"))
 
 # ══════════════════════════════════════════════════════════════════
 # STARTUP
 # ══════════════════════════════════════════════════════════════════
 console.print(BANNER)
-console.print(f"\n[bold cyan]  Vision CLI v4.1 — JARVIS Mode Active[/bold cyan]")
+console.print(f"\n[bold cyan]  Vision CLI v4.4 — JARVIS Mode Active[/bold cyan]")
 if memory:
     console.print(f"[dim]  ✓ {len(memory)} memories | {len(goals)} goals | "
                   f"{len(portfolio)} stocks | {len(automations)} automations[/dim]\n")
 
-provider_choice = select_provider()
+# ── Setup wizard for first-time users ───────────────────────────
+is_first_run = data.get("first_run", True) and not os.path.exists(DATA_FILE + ".bak")
+wizard_provider = None
+if is_first_run:
+    wizard_provider, _ = run_setup_wizard()
+
+# ── API mode check (--api flag) ──────────────────────────────────
+api_mode = "--api" in sys.argv
+
+# ── Provider setup ───────────────────────────────────────────────
+if wizard_provider:
+    provider_choice = wizard_provider
+else:
+    provider_choice = select_provider()
+
 client, provider_name = setup_provider(provider_choice)
 current_provider_name = provider_name
 model = select_model_main(client, provider_name)
-# Groq + Rich Live streaming doesn't render properly in Colab — auto-disable
 if provider_name == "Groq":
     streaming_mode = False
     console.print("[dim]ℹ Streaming auto-disabled for Groq (Colab compatibility)[/dim]")
 show_help(provider_name, model)
 
-council_chairman_id  = None
-council_sub_ids      = []
-council_sub_names    = []
+council_chairman_id   = None
+council_sub_ids       = []
+council_sub_names     = []
 council_chairman_name = ""
 
 if automations:
     start_automation_runner(client, model)
 
-last_reply = ""
+# ── If --api flag, start local server and skip CLI loop ──────────
+if api_mode:
+    start_api_server(client, model)
+    sys.exit(0)
+
+# Run predictive check on startup
+if predictive_patterns:
+    predictive_check(client, model)
+
+last_reply            = ""
+last_council_verdict  = ""
+last_agent_result     = ""
+
+# ── Skills ──────────────────────────────────────────────────────────
+active_skills         = []   # list of skill names currently loaded
+active_skill_content  = ""   # combined skill instructions injected into system prompt
 
 # ══════════════════════════════════════════════════════════════════
 # MAIN LOOP
@@ -1509,11 +2769,34 @@ while True:
     if not user: continue
 
     elif user in ("/exit","/q","/quit"):
-        save_data(); stop_music(); console.print("[bold red]Bye![/bold red]"); break
+        economy_update_session()
+        save_data()
+        stop_music()
+        console.print("[bold red]Bye![/bold red]")
+        break
     elif user == "/clear":
-        history.clear(); console.print("[green]✓ Cleared[/green]")
+        global last_council_verdict, last_agent_result, conversation_summary, advisor_summary
+        history.clear()
+        advisor_history.clear()
+        last_council_verdict  = ""
+        last_agent_result     = ""
+        conversation_summary  = ""
+        advisor_summary       = ""
+        console.print("[green]✓ Cleared — full fresh session[/green]")
     elif user == "/help":
         show_help(provider_name, model)
+    elif user == "/refresh":
+        # Redraw prompt — fixes disappearing input box in Colab
+        console.print("\n" * 3)
+        console.print(Panel(
+            f"[bold cyan]Vision CLI v4.4[/bold cyan]  |  "
+            f"Provider: [green]{provider_name}[/green]  |  "
+            f"Model: [green]{model.split('/')[-1]}[/green]  |  "
+            f"Skills: [cyan]{', '.join(active_skills) if active_skills else 'none'}[/cyan]\n\n"
+            f"[dim]Type your message below ↓[/dim]",
+            border_style="cyan"))
+        sys.stdout.write("[YOU] → ")
+        sys.stdout.flush()
     elif user == "/model":
         model = select_model_main(client, provider_name)
     elif user == "/provider":
@@ -1533,6 +2816,9 @@ while True:
     elif user == "/stream":
         streaming_mode = not streaming_mode
         console.print(f"[green]Streaming: {'ON' if streaming_mode else 'OFF'}[/green]")
+    elif user.startswith("/skill"):
+        handle_skill_command(user)
+
     elif user == "/mic on":
         mic_mode=True; console.print("[green]🎤 Mic ON[/green]")
     elif user == "/mic off":
@@ -1578,6 +2864,7 @@ while True:
     # Advisor
     elif user.startswith("/advisor "):
         console.print("[yellow]Advisor thinking...[/yellow]")
+        _track_usage("/advisor", user[9:])
         reply = advisor_chat(client, model, user[9:])
         last_reply = reply
         console.print(Panel(Markdown(reply),title="[bold cyan]Your Advisor[/bold cyan]",border_style="cyan"))
@@ -1610,26 +2897,40 @@ while True:
         if user == "/councilsetup":
             console.print("[green]✓ Council ready.[/green]"); continue
         if user.startswith("/council "):
-            reply = llm_council(client,user[9:].strip(),council_chairman_id,council_sub_ids,council_sub_names)
-            if reply: last_reply=reply
+            q = user[9:].strip()
+            reply = llm_council(client,q,council_chairman_id,council_sub_ids,council_sub_names)
+            if reply:
+                last_reply = reply; last_council_verdict = reply
+                council_save_session(q, reply, "council")
         elif user.startswith("/debate "):
-            reply = llm_debate(client,user[8:].strip(),council_chairman_id,council_sub_ids,council_sub_names)
-            if reply: last_reply=reply
+            m = user[8:].strip()
+            reply = llm_debate(client,m,council_chairman_id,council_sub_ids,council_sub_names)
+            if reply:
+                last_reply = reply; last_council_verdict = reply
+                council_save_session(m, reply, "debate")
+    elif user.startswith("/council history"):
+        handle_council_history(user, client, model)
     elif user.startswith("/council "):
         query = user[9:].strip()
         if query:
             reply = llm_council(client,query,council_chairman_id,council_sub_ids,council_sub_names)
-            if reply: last_reply=reply
+            if reply:
+                last_reply = reply; last_council_verdict = reply
+                council_save_session(query, reply, "council")
     elif user.startswith("/debate "):
         motion = user[8:].strip()
         if motion:
             reply = llm_debate(client,motion,council_chairman_id,council_sub_ids,council_sub_names)
-            if reply: last_reply=reply
+            if reply:
+                last_reply = reply; last_council_verdict = reply
+                council_save_session(motion, reply, "debate")
 
     # Multi-Agent
     elif user.startswith("/agent "):
         reply = spawn_agents(client, model, user[7:].strip())
-        if reply: last_reply=reply
+        if reply:
+            last_reply        = reply
+            last_agent_result = reply
 
     # GitHub
     elif user == "/ghconnect":            github_connect()
@@ -1664,7 +2965,67 @@ while True:
     elif user == "/automations":         automation_list()
     elif user.startswith("/autodelete "): automation_remove(user[12:].strip())
 
-    # Stocks
+    # v4.1 — Economy + Self-Improvement
+    elif user == "/context":
+        console.print(Panel(
+            f"[bold cyan]Context Window Status[/bold cyan]\n\n"
+            f"[white]Main chat messages:[/white]     {len(history)} / {MAX_HISTORY}\n"
+            f"[white]Advisor messages:[/white]       {len(advisor_history)} / {MAX_HISTORY}\n"
+            f"[white]Rolling summary:[/white]        {'Yes (' + str(len(conversation_summary)) + ' chars)' if conversation_summary else 'None yet'}\n"
+            f"[white]Advisor summary:[/white]        {'Yes (' + str(len(advisor_summary)) + ' chars)' if advisor_summary else 'None yet'}\n"
+            f"[white]Compression at:[/white]         {MAX_HISTORY} messages\n"
+            f"[white]Kept verbatim:[/white]          last {KEEP_RECENT} messages\n"
+            f"[white]Compressed per batch:[/white]   {SUMMARY_TAKE} messages → summary\n\n"
+            f"[dim]Use /clear to reset everything including summaries[/dim]",
+            border_style="cyan"))
+
+    # Undo
+    elif user == "/undo":
+        undo_last()
+    elif user == "/undo history":
+        undo_show()
+
+    # Export
+    elif user.startswith("/export"):
+        label = user[7:].strip() or "session"
+        export_session(label)
+
+    # Council history
+    elif user.startswith("/council history"):
+        handle_council_history(user, client, model)
+
+    # Skill marketplace
+    elif user == "/skill marketplace":
+        skill_marketplace_list()
+    elif user.startswith("/skill install "):
+        skill_install(user[15:].strip())
+
+    # API mode (runtime toggle)
+    elif user == "/api":
+        console.print("[yellow]Starting local API server...[/yellow]")
+        threading.Thread(target=start_api_server, args=(client, model),
+                         daemon=True).start()
+
+    # Economy + Self-Improvement
+    elif user == "/economy":
+        economy_report()
+    elif user == "/weeklyreport":
+        economy_weekly_report(client, model)
+    elif user == "/selfimprove":
+        self_improve_report(client, model)
+    elif user == "/patterns":
+        if not predictive_patterns:
+            console.print("[yellow]No patterns learned yet. Use Vision more and patterns will emerge.[/yellow]")
+        else:
+            table = Table(box=box.ROUNDED, border_style="magenta", padding=(0,1))
+            table.add_column("Pattern",     style="cyan")
+            table.add_column("Trigger",     style="yellow")
+            table.add_column("Action",      style="green")
+            for p in predictive_patterns[-10:]:
+                table.add_row(p.get("description","?"), p.get("trigger","?"), p.get("action","?"))
+            console.print(table)
+
+    # Stocks (track usage)
     elif user.startswith("/stock "):       get_stock(user[7:].strip().upper())
     elif user.startswith("/stocks "):      search_stocks(user[8:].strip())
     elif user.startswith("/recommend "):  stock_recommend(client,model,user[11:])
@@ -1718,12 +3079,14 @@ while True:
     # Main chat
     else:
         console.print("[yellow]Thinking...[/yellow]")
+        _track_usage("chat", user)
         reply = chat(client, model, user)
+        # Auto web search if Vision signals uncertainty
+        reply = auto_web_search_and_enhance(client, model, user, reply)
         last_reply = reply
         if not streaming_mode:
             console.print(Panel(Markdown(reply), border_style="blue"))
         else:
-            # streaming already printed via Live — just add a newline for spacing
             console.print("")
         if mic_mode: speak(reply[:300])
         auto_memory(client, model, user, reply)
