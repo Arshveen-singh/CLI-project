@@ -1,286 +1,238 @@
-## Vision CLI — Changelog
+# Changelog
+
+All notable changes to Vision CLI are documented here.
+Format inspired by [Keep a Changelog](https://keepachangelog.com).
+
+---
+
+## [1.4.4-beta] — 2026-03-19
+
+### Added — CodeMode (`/codemode`, `/cm`)
+- New dedicated developer environment with a full ASCII banner on entry
+- `CODEMODE_SYSTEM_PROMPT` — separate system prompt for CodeMode, distinct from the skill file
+  - Enforces: no pseudocode, error handling on every function, inline comments always
+  - Security mindset: silently checks every response for hardcoded secrets, injection vectors
+  - Structured output format: root cause → code → run command → what to test → next step
+  - Identity: responds as "Vision CM", never leaks underlying model
+- `CODEMODE_SKILL` — `.md` skill file stacked on top of system prompt for additional context
+- Input prompt changes from `[YOU] →` to `[YOU:CM] →` when active
+- Coding-specific model selector on entry — ranked by provider with Free/Paid tags
+- API key setup check on first enter — guides user to get key if missing
+
+### Added — CodeMode Sub-modes
+| Command | What it does |
+|---------|-------------|
+| `/cm plan <task>` | Architecture diagram + file tree + numbered steps + risks before any code |
+| `/cm build <task>` | Full production code generation |
+| `/cm review <file>` | Deep review with Critical / High / Medium / Low severity ratings |
+| `/cm debug <file>` | Root cause in one sentence + fix |
+| `/cm refactor <file>` | Refactor in-place, behavior unchanged |
+| `/cm swarm <task>` | 5 specialist agents in parallel |
+| `/cm swarm-select <task>` | Pick a different model per swarm agent |
+| `/cm search <query>` | Coding-specific web search with code examples |
+
+### Added — Agent Swarm
+- 5 specialist roles run in parallel threads: Architect, Security, Reviewer, Optimizer, TestWriter
+- Each agent gets a role-specific system directive + the shared CodeMode system prompt
+- Coordinator (current model) merges all results into a final synthesized verdict
+- `/cm swarm-select` lets you assign a different model to each agent role
+
+### Added — GitHub Improvements
+- `/reposelect` — interactive numbered repo picker (replaces manual `user/repo` typing)
+- `/repoload` with no argument now opens the interactive picker
+- `/repoedit <path> | <instruction>` — AI edits a file from the loaded repo in-place
+  - Shows `+N / -N` line diff before writing
+  - Options: save locally / save + push to GitHub / cancel
+  - Auto-generates conventional commit message on push
+- `/repoask` now uses `CODEMODE_SYSTEM_PROMPT` when in CodeMode
+- Repo load now also fetches `.css`, `.html`, `.sh`, `.gitignore`, `.env.example` files
+- Loaded repo auto-saved to CM memory when CodeMode is active
+
+### Added — File Editing
+- `/apply` — writes last generated code block directly to disk (no copy-paste)
+- `/apply <filename>` — write to a specific file
+- `/edit <file> <instruction>` — AI edits an existing local file in-place, shows diff
+
+### Added — CM Memory
+- Separate memory namespace for CodeMode, independent of main Vision memory
+- `/cmmem add <key> <val>` — save project context (stack, patterns, decisions)
+- `/cmmem view` — display all CM memories in a table
+- `/cmmem forget <key>` — delete a CM memory
+- Injected into all CodeMode prompts automatically
+
+### Added — CM Git Commands
+- `/cmgit status` — git status with AI-suggested commit message
+- `/cmgit diff` — git diff with plain-English explanation of every change
+- `/cmcommit` — auto-generates conventional commit message and pushes
+- `/cmcommit "message"` — uses provided message and pushes
+
+### Added — Auto Web Search in CodeMode
+- Queries containing "how to", "docs for", "npm", "pip", "library for", "install", "syntax for" auto-trigger DuckDuckGo search
+- Returns synthesized answer with minimal working code example and source link
+- Bypasses normal chat path — faster for lookup queries
+
+### Changed
+- All CodeMode API calls now use `CODEMODE_SYSTEM_PROMPT` as system message (previously used `CODEMODE_SKILL` directly)
+- Main chat panel border turns green in CodeMode instead of blue
+- `actionable_error()` used throughout CodeMode instead of raw exception strings
+
+---
+
+## [4.4.0] — 2026-03-15
+
+### Added
+- **Setup wizard** — runs on first launch only, guides through provider selection, API key entry, and feature overview
+- **`/export [label]`** — exports full session (chat, council verdict, agent results, memories, goals, portfolio) to a dated markdown file
+- **`/undo`** — undoes last memory add, automation add, or goal add
+- **`/undo history`** — shows the undo stack (last 10 reversible actions)
+- **Multi-session Council history** — every council and debate verdict saved persistently
+  - `/council history` — list all past sessions
+  - `/council history view <#>` — read full verdict
+  - `/council history compare <#> <#>` — AI comparison of two past verdicts
+- **Skill marketplace** — `/skill marketplace` browses GitHub-hosted community skills, `/skill install <n>` downloads and installs
+- **Local API mode** — `/api` or `python vision_cli.py --api` starts a Flask server on `localhost:7842`
+  - Endpoints: `POST /chat`, `POST /advisor`, `GET /memory`, `POST /memory`, `GET /stock/<SYM>`, `GET /status`
+  - 100% local — no cloud, no external server required
+- **Auto web search** — detects uncertainty phrases in Vision's reply ("I don't know", "my knowledge cutoff") and auto-searches DuckDuckGo, then enhances the answer with sources
+
+### Fixed
+- `actionable_error()` — all API errors now show human-readable fix suggestions instead of raw tracebacks
+- `vision_data.json` auto-archives at 5MB and trims aggressively — prevents unbounded file growth
+- `load_data()` now migrates old data files by adding missing keys, prevents crashes on version upgrade
 
-v1.4.4-beta — CodeMode Complete
-Full developer environment — system prompt, GitHub integration, file editing, agent swarm
-CodeMode System Prompt
+---
 
-CODEMODE_SYSTEM_PROMPT — dedicated system prompt separate from CODEMODE_SKILL
+## [4.3.0] — 2026-03-12
 
-Two-layer architecture: system prompt (identity + rules) + skill file (context injection)
-Absolute rules: no pseudocode, error handling always, inline comments always
-GitHub awareness: references actual file paths + function names from loaded repo
-Security mindset: silently checks every code block for hardcoded secrets, injection vectors, unvalidated input
-Structured response format enforced: root cause → code → run → test → next
-Identity: "I'm Vision CM" — never leaks underlying model
+### Added
+- **Rolling context summarization** — replaces the hard 20-message trim
+  - `MAX_HISTORY = 40` messages before compression kicks in
+  - Oldest 20 messages compressed into ~200 word summary block (background thread, never blocks)
+  - Last 20 messages always kept verbatim
+  - Separate rolling summaries for main chat and advisor
+  - Summaries chain — older context stacks, nothing discarded
+- **`/context`** — shows live context window status, message counts, summary size, compression settings
 
+### Fixed
+- `/clear` now resets rolling summaries, council verdict, and agent result — full fresh session
 
+---
 
-GitHub Repo Selector
+## [4.2.0] — 2026-03-10
 
-/reposelect — interactive numbered repo picker
-/repoload (no args) — same as reposelect
-Shows: repo name, language, stars, last updated, loaded status (✅)
-Pick by number or type user/repo directly
-Auto-saves loaded repo to CM memory when in CodeMode
+### Added
+- **Skills system** — loadable `.md` files that reshape Vision's entire behavior
+  - 5 built-in skills auto-created on first run: `coding`, `security`, `research`, `teacher`, `jarvis`
+  - `/skill list`, `/skill load <n>`, `/skill unload <n>`, `/skill create <n>`, `/skill edit <n>`, `/skill reload <n>`, `/skill active`, `/skill clear`
+  - Multiple skills stack simultaneously
+  - Custom skills: any `.md` file in `vision_skills/` with `## Role`, `## Rules`, `## Style` sections
+- **`/refresh`** — redraws the input box (fixes disappearing prompt in Colab)
 
-/repoedit — AI file editing from GitHub
+### Fixed
+- Vision always identifies as Vision — never leaks underlying model name to user
+- Advisor no longer references stale council verdicts from previous sessions
+- `validate_model()` hard-rejects HTML error pages (`Cannot POST`, `<!DOCTYPE`) instead of warning + passing
+- Bytez API endpoint corrected
 
-Usage: /repoedit <path> | <instruction>
-Fetches file from loaded repo, AI edits in-place
-Shows +N / -N line diff after editing
-Three options: y save locally / p save + push / n cancel
-Auto-generates conventional commit message on push via cm_smart_commit()
+---
 
-/repoask Improvements
+## [4.1.0] — 2026-03-07
 
-Now uses CODEMODE_SYSTEM_PROMPT when in CodeMode, SYSTEM_PROMPT otherwise
-Increased context window to 14,000 chars (was 12,000)
-References actual file paths in answers
-Panel color: green in CodeMode, cyan in normal mode
+### Added
+- **Self-improving engine** — silent usage tracking on every command
+  - `/selfimprove` — analyzes patterns, suggests automations, recommends best model per task type
+  - `/economy` — personal AI dashboard (sessions, total time, top commands, peak hours)
+  - `/weeklyreport` — AI-generated productivity report
+  - `/patterns` — shows learned predictive automation patterns
+- **Predictive automation** — `predictive_check()` runs on startup, suggests automations based on time-of-day usage patterns
+- Economy stats updated automatically on session exit
 
-CodeMode Sub-modes
+---
 
-/cm plan <task> — architecture diagram + file tree + numbered steps + risks
-/cm build <task> — direct production code generation
-/cm review <file> — deep review with Critical/High/Medium/Low severity ratings
-/cm debug <file> — smart debug with root cause explanation
-/cm refactor <file> — AI refactors file in-place
-/cm swarm <task> — 5 specialist agents in parallel (Architect, Security, Reviewer, Optimizer, TestWriter)
-/cm swarm-select <task> — pick different model per swarm agent
-/cm search <query> — coding-specific DuckDuckGo search
+## [4.0.0] — 2026-03-04
 
-CodeMode File Editing
+### Added
+- **Multi-agent task engine** — `/agent <complex task>`
+  - Decomposes task into 2-4 specialist sub-agent roles via `_plan_agents()`
+  - All agents run in parallel threads simultaneously
+  - Coordinator merges all results into one comprehensive answer
+  - `last_agent_result` injected into Vision and Advisor context
 
-/apply — write last generated code directly to disk
-/apply <filename> — write to specific file
-/edit <file> <instruction> — AI edits existing local file in-place
+---
 
-CM Memory
+## [3.9.0] — 2026-02-28
 
-/cmmem add/view/forget — CodeMode-specific memory separate from Vision memory
-Auto-saves loaded_repo and last_plan to CM memory
-Injected into all CM prompts via get_cm_memory_context()
+### Added
+- **Automation scheduler** — background thread checks every 30 seconds
+  - Trigger formats: `daily:HH:MM`, `interval:Nm`, `interval:Nh`
+  - Action formats: `/command`, `open:url`, `shell:cmd`, `chat:prompt`
+  - `/automate`, `/automations`, `/autodelete`
+- **Telegram** — `/telegramsetup`, `/telegram <msg>`, `/telegramread`
+- **Email (SMTP)** — `/emailsetup`, `/email <to> | <subject> | <body>`
 
-CM GitHub Commands
+---
 
-/cmgit status — git status + AI commit message suggestion
-/cmgit diff — git diff + AI explanation of every change
-/cmcommit — auto-generate conventional commit message + push
-/cmcommit "msg" — manual message + push
+## [3.8.0] — 2026-02-24
 
-CM Web Search
+### Added
+- **GitHub integration** — `/ghconnect`, `/myrepos`, `/repoload`, `/repofile`, `/repoask`, `/reporeview`, `/commit`
+- `/reporeview` runs LLM Council on loaded codebase
 
-/cmsearch <query> — coding-specific search, synthesized answer with code examples
-Auto-triggers in CodeMode on queries containing: "how to", "docs for", "npm", "pip", "library for", "install", etc.
-Normal chat in CodeMode gets auto-search instead of uncertainty fallback
+---
 
-Agent Swarm
+## [3.7.0] — 2026-02-20
 
-5 specialist roles: Architect, Security, Reviewer, Optimizer, TestWriter
-All run in parallel threads simultaneously
-Each agent can use a different model via /cm swarm-select
-Coordinator (current model) merges all results into final verdict
-Saves result to CM memory
+### Added
+- Real-time streaming via Rich `Live` display
+- `/stream` toggle
+- `/vision <image_path>` — base64 image input for vision-capable models
 
-Prompt Changes
+### Fixed
+- Groq streaming auto-disabled on startup (Colab compatibility — Rich Live doesn't render)
+- `get_max_tokens()` — Groq capped at 1024, others at 2048, prevents mid-response cutoffs
 
-Replaced: All CodeMode system positions now use CODEMODE_SYSTEM_PROMPT (not CODEMODE_SKILL)
-CODEMODE_SKILL remains as skill file content only (injected via active_skills)
-Main chat in CodeMode uses green border panel instead of blue
+---
 
+## [3.6.0] — 2026-02-16
 
-v4.4 — Setup Wizard + 8 Major Features
+### Added
+- Auto-memory — background thread extracts facts from every conversation silently
+- Tagged memory — `#personal`, `#stock`, `#weather`, `#council`, `#code`, `#goal`, `#auto`
+- `/memory add <key> <val> [#tag]`, `/memory view [#tag]`, `/memory forget <key>`
+- Memory injected into all AI calls: main chat, advisor, council, agents
 
-Setup wizard, actionable errors, data cleanup, /export, auto web search
-/undo + /undo history, multi-session council history
-Skill marketplace, local API mode (/api, --api flag)
+---
 
+## [3.5.0] — 2026-02-12
 
-v4.3 — Bigger Context Window
+### Added
+- Together AI, Fireworks, Mistral, Cerebras, NVIDIA NIM, SambaNova, Bytez (total: 9 providers + Bytez)
+- Suggested model lists per provider
+- `validate_model()` — test API call before accepting any model ID
+- `current_provider_name` global for provider-aware behavior
+- `/q` and `/quit` as exit aliases (Colab safety — Ctrl+C kills kernel)
 
-Rolling summarization — MAX_HISTORY=40, compress oldest 20 into summary
-/context command, /clear resets summaries
+---
 
+## [3.2.0] — 2026-02-05
 
-v4.2 — Skills System + Stability
+### Added
+- **LLM Council** — parallel subordinate calls + Chairman synthesis — `/council`, `/councilsetup`
+- **Debate Mode** — assigns FOR / AGAINST / SKEPTIC / DEVIL'S ADVOCATE — `/debate`
+- Custom model selector — free-input, not locked to suggested list
+- Council verdicts auto-saved to memory with `#council` tag
 
-5 built-in skills, /skill commands, /refresh, identity fix, advisor context fix
+---
 
+## [3.0.0] — 2026-01-28
 
-v4.1 — Self-Improving Engine
-
-/selfimprove, /economy, /weeklyreport, /patterns, predictive automation
-
-
-v4.0 — Multi-Agent Task Engine
-
-/agent, parallel sub-agents, coordinator merge
-
-
-v3.9 — Automation + Integrations
-
-Scheduler, open:url, shell:cmd, Telegram, Email
-
-
-v3.8 — GitHub Integration
-
-/ghconnect, /repoload, /repoask, /reporeview, /commit
-
-
-v3.7 — Streaming + Vision Input
-
-Rich Live streaming, /vision, Groq auto-disable on Colab
-
-
-v3.6 — Smart Memory
-
-Auto-memory background thread, tagged memory, injected into all calls
-
-
-v3.5 — 9 Providers
-
-Together, Fireworks, Mistral, Cerebras, NVIDIA NIM, SambaNova, Bytez
-
-
-v3.2 — LLM Council
-
-Parallel subordinates + Chairman, Debate Mode, custom model selector
-
-
-v3.0 — Core Rewrite
-
-Python rewrite, Rich UI, persistent storage, full feature set
-
-The complete developer mode
-
-CodeMode — /codemode or /cm activates a dedicated developer environment
-
-Full ASCII art banner on entry: CODEMODE CLI VISION CM
-Coding-specific model selector — every provider shows ranked coding models with Free/Paid tags
-API key setup wizard on first enter — guides to get key for selected provider
-Injects CODEMODE_SKILL — full detailed skill: production code only, error handling always,
-GitHub-aware responses, security severity ratings, ASCII architecture diagrams
-Input prompt changes from [YOU] → to [YOU:CM] →
-/codemode when already active shows CM-specific command reference
-/codemode off to exit back to default Vision mode
-Selected coding model replaces current model for the session
-Model rankings per provider: Kimi K2, Qwen 3, DeepSeek R1, Codestral, LLaMA 405B etc.
-
-
-
-
-v4.4 — Setup Wizard + 8 Major Features
-
-Setup wizard — first-run only, guides through provider + key + feature overview
-Actionable errors — every API failure gives specific fix suggestion (not raw traceback)
-Data cleanup — vision_data.json auto-archives at 5MB, trims aggressively after
-/export [label] — full session → clean markdown file (chat, council, memories, goals)
-Auto web search — detects uncertainty phrases → auto DuckDuckGo → enhanced answer
-/undo + /undo history — undo stack for memory, automation, goal adds (last 10)
-Multi-session Council history — /council history, view <#>, compare <#> <#>
-Skill marketplace — /skill marketplace + /skill install <n> from GitHub
-Local API mode — /api or --api flag → Flask on localhost:7842
-
-Endpoints: /chat, /advisor, /memory, /stock/<SYM>, /status
-100% local — no cloud, no external server
-
-
-
-
-v4.3 — Bigger Context Window
-Rolling summarization — no context ever lost
-
-MAX_HISTORY = 40 — double old limit before compression
-Oldest 20 messages compressed into ~200 word summary block
-Last 20 always verbatim. Compression in background thread
-Works independently for main chat AND advisor
-conversation_summary + advisor_summary globals
-/context — shows window status, summary size, compression settings
-/clear resets everything — history, advisor, summaries, council/agent context
-
-
-v4.2 — Skills System + Stability
-
-Skills System — vision_skills/ directory with .md skill files
-
-5 built-in skills: coding, security, research, teacher, jarvis
-/skill load/unload/list/active/clear/create/edit/reload
-Stack multiple skills simultaneously
-
-
-/refresh — redraws input box, fixes disappearing prompt in Colab
-Identity fix — Vision always identifies as Vision, never leaks underlying model
-Advisor context fix — /clear resets stale council context from previous sessions
-Bytez HTML error fix — hard-rejects HTML error pages instead of warning + passing
-Bytez URL fix — corrected endpoint
-Bytez warning — displays routing notice on provider selection
-
-
-v4.1 — Self-Improving Engine
-
-/selfimprove — usage pattern analysis + automation suggestions + model optimization
-/economy — sessions, total time, top commands, peak hours dashboard
-/weeklyreport — AI-generated productivity report
-/patterns — learned predictive automations
-predictive_check() — startup trigger for time-based patterns
-Session duration tracked, economy updated on exit
-
-
-v4.0 — Multi-Agent Task Engine
-
-/agent <task> — decomposes into 2-4 specialist roles, parallel execution
-Coordinator merges all results into final answer
-last_agent_result injected into Vision + Advisor context
-
-
-v3.9 — Automation + Integrations
-
-Scheduler — daily:HH:MM, interval:Nm/Nh
-open:url, shell:cmd, chat:prompt action types
-Telegram — /telegramsetup, /telegram, /telegramread
-Email (SMTP) — /emailsetup, /email
-
-
-v3.8 — GitHub Integration
-
-/ghconnect, /myrepos, /repoload, /repofile, /repoask, /reporeview, /commit
-
-
-v3.7 — Streaming + Vision Input
-
-Real-time streaming via Rich Live
-Groq streaming auto-disabled on Colab
-/vision <image_path> — image understanding
-
-
-v3.6 — Smart Memory
-
-Auto-memory — extracts facts silently in background
-Tagged memory — #personal, #stock, #weather, #council
-Memory injected into all AI calls
-
-
-v3.5 — 9 Providers
-
-Together, Fireworks, Mistral, Cerebras, NVIDIA NIM, SambaNova, Bytez
-get_max_tokens() — Groq auto-caps at 1024
-/q and /quit as exit aliases
-
-
-v3.2 — LLM Council
-
-Parallel subordinate calls + Chairman synthesis
-Debate Mode — FOR/AGAINST/SKEPTIC/DEVIL'S ADVOCATE
-Custom model selector with validate_model()
-
-
-v3.0 — Core Rewrite
-
-Python rewrite, Rich UI, persistent storage
-Memory, goals, portfolio, advisor, music, timer, image gen, stocks, OCR
-
-
-## v1.0–v2.x — Early Versions
-- Basic CLI chat with Groq
-- Initial stock and advisor features
-- Vision CLI name established
+### Added
+- Full Python rewrite with Rich terminal UI
+- Persistent storage via `vision_data.json`
+- Memory, goals, portfolio, advisor mode
+- Music player (yt-dlp + pygame), timer, stopwatch
+- Image generation (Pollinations → HuggingFace fallback)
+- TTS + voice input
+- Stock data (yfinance, NSE + US markets, Indian sectors)
+- Code generation, debug, file runner
+- Web search (DuckDuckGo), scrape, wiki, weather, OCR
