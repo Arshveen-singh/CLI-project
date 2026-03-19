@@ -8,17 +8,9 @@ Thanks for being here. Vision CLI is solo-built and every contribution matters.
 
 | Issue | Difficulty | What's needed |
 |-------|-----------|---------------|
-| Rolling context summarization | Medium | Replace 20-msg trim with rolling summary |
-| Auto web search in chat | Medium | Vision auto-searches when it doesn't know |
-| WhatsApp integration | Easy | Twilio API, ~40 lines |
-| Discord integration | Easy | discord.py, ~50 lines |
-| Google Calendar | Medium | OAuth2 + event creation |
 | Wake word detection | Hard | Background mic thread, hotword model |
 | Flutter mobile app | Hard | Cross-device sync |
 | Self-healing code runner | Medium | Auto-debug + retry on `/runfile` errors |
-| Notion integration | Easy | notion-client, ~40 lines |
-| Spotify integration | Medium | spotipy OAuth, ~60 lines |
-
 ---
 
 ## How to Add a New Provider
