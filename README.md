@@ -15,7 +15,7 @@ Free forever.
   ╚═══╝  ╚═╝╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝     ╚═════╝╚══════╝╚═╝
 ```
 
-> ⚠️ v3.4.7 — stable beta. Report bugs via Issues.
+> ⚠️ v3.4.5 — stable beta. Report bugs via Issues.
 
 ---
 
@@ -291,7 +291,7 @@ pytest tests/
 |---------|--------|----------|
 | v3.0–v3.9 | ✅ | Core rewrite → GitHub → Automation → Streaming |
 | v1.4.4-beta | ✅ | CodeMode, AutoMode, Skills, Council History |
-| v3.4.7 | ✅ | 17 providers, test loop, folder watch, sessions, VISION.md |
+| v3.4.5-beta | ✅ | 17 providers, test loop, folder watch, sessions, VISION.md |
 | v4.0.0 | 🔲 | pip install, local filesystem awareness |
 | v4.1.0 | 🔲 | VS Code extension, IDE integration |
 | v4.2.0 | 🔲 | Flutter mobile app |
